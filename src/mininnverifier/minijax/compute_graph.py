@@ -46,6 +46,10 @@ class Const:
         self.value = value
         self.is_const = True
 
+    @property
+    def shape(self):
+        return self.value.shape
+
     def __repr__(self) -> str:
         return f"Const({self.value})"
 
@@ -58,7 +62,7 @@ class Equation:
     options: dict
 
     def __repr__(self) -> str:
-        opts = ", ".join([f"{k}: {v}" for k, v in self.options.items()])
+        opts = ", ".join([f"{k}={v}" for k, v in self.options.items()])
         opts = f"[{opts}]" if opts else ""
         repr = f"{self.outvar} = {self.primitive.name}{opts} "
         return repr + " ".join(map(str, self.inputs))
