@@ -7,7 +7,7 @@ from . import core
 
 class Array(core.Value):
     def __init__(self, array_like):
-        self.array = np.asarray(array_like)
+        self.array = np.asarray(array_like, dtype=np.float64)
         super().__init__(EvalInterpreter(), self.array.shape)
 
     def item(self):
@@ -19,7 +19,7 @@ class Array(core.Value):
 
 
 def full(shape, fill_value):
-    return Array(np.full(shape, fill_value))
+    return Array(np.full(shape, fill_value, dtype=np.float64))
 
 
 def zeros(shape):

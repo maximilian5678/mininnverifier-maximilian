@@ -1,19 +1,17 @@
 [project]
-name = "minijax"
-version = "0.1.1"
-description = "A mini machine learning framework a la JAX."
+name = "mininnverifier"
+version = "0.0.1"
+description = "A minimal neural network verifier for educational purposes."
 readme = "README.md"
-authors = [
-    { name = "David Boetius", email = "david.boetius@uni-konstanz.de" }
-]
+authors = [{ name = "David Boetius", email = "david.boetius@uni-konstanz.de" }]
 requires-python = ">=3.14"
 dependencies = ["numpy >= 2.0, <3.0"]
 
 [project.optional-dependencies]
 demos = [
-    "matplotlib >= 3.0, < 4.0",
-    "scikit-learn >= 1.8.0, < 2.0",
-    "jupyter >= 1.1, < 2.0",
+  "matplotlib >= 3.0, < 4.0",
+  "scikit-learn >= 1.8.0, < 2.0",
+  "jupyter >= 1.1, < 2.0",
 ]
 
 [build-system]
