@@ -1,0 +1,7 @@
+{
+    "command": "train",
+    "dataset": "mnist_mlp",
+    "in_size": 784,
+    "num_classes": 10,
+    "source_dataset": "mnist"
+}

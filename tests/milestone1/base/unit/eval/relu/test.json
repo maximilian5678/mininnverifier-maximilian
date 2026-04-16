@@ -1,0 +1,10 @@
+{
+    "command": "eval",
+    "network": "resources/relu_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ]
+}

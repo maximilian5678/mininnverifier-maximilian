@@ -1,0 +1,11 @@
+{
+    "command": "eval",
+    "network": "resources/mul_network.mininn",
+    "inputs": [
+        "resources/input_0.bin",
+        "resources/input_1.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ]
+}

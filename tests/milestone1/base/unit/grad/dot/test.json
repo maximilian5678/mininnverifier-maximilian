@@ -1,0 +1,12 @@
+{
+    "command": "grad",
+    "network": "resources/dot_network.mininn",
+    "inputs": [
+        "resources/input_0.bin",
+        "resources/input_1.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin",
+        "expected_grad_1.bin"
+    ]
+}

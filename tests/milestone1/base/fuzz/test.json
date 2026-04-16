@@ -1,0 +1,5 @@
+{
+    "command": "fuzz_eval",
+    "n_trials": 100,
+    "seed": 42
+}

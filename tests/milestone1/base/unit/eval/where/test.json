@@ -1,0 +1,12 @@
+{
+    "command": "eval",
+    "network": "resources/where_network.mininn",
+    "inputs": [
+        "resources/input_0.bin",
+        "resources/input_1.bin",
+        "resources/input_2.bin"
+    ],
+    "expected_outputs": [
+        "expected_output_0.bin"
+    ]
+}

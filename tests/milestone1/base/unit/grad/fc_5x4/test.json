@@ -1,0 +1,10 @@
+{
+    "command": "grad",
+    "network": "resources/fc_5x4_network.mininn",
+    "inputs": [
+        "resources/input_0.bin"
+    ],
+    "expected_outputs": [
+        "expected_grad_0.bin"
+    ]
+}
