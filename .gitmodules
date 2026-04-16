@@ -1,3 +1,3 @@
 [submodule "test/runner"]
-	path = tests/runner
+	path = tests/testrunner
 	url = git@github.com:cherrywoods/mininnverifier-test-runner.git
