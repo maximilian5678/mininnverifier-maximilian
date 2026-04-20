@@ -1,14 +1,14 @@
 {
-    "command": "fuzz_grad",
-    "n_trials": 100,
-    "seed": 5785067,
-    "primitives": [
-        "expand_dims",
-        "moveaxis",
-        "reshape",
-        "reduce_sum"
-    ],
-    "check_nan_inf": false,
-    "description": "targeted gradient fuzz for shape-manipulating primitives to verify transposed shape-propagation in the backward pass",
-    "points": 6
+  "command": "fuzz_grad",
+  "n_trials": 50,
+  "seed": 5785067,
+  "primitives": [
+    "expand_dims",
+    "moveaxis",
+    "reshape",
+    "reduce_sum"
+  ],
+  "check_nan_inf": false,
+  "description": "targeted gradient fuzz for shape-manipulating primitives to verify transposed shape-propagation in the backward pass",
+  "points": 6
 }

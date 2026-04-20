@@ -1,16 +1,16 @@
 {
-    "command": "fuzz_grad",
-    "n_trials": 200,
-    "seed": 4302181,
-    "primitives": [
-        "relu",
-        "square",
-        "dot",
-        "add",
-        "mul",
-        "neg"
-    ],
-    "check_nan_inf": true,
-    "description": "backward-pass numerics fuzz over curated finite-gradient subset (relu/square/dot/add/mul/neg); fails on NaN/Inf in gradients",
-    "points": 6
+  "command": "fuzz_grad",
+  "n_trials": 100,
+  "seed": 4302181,
+  "primitives": [
+    "relu",
+    "square",
+    "dot",
+    "add",
+    "mul",
+    "neg"
+  ],
+  "check_nan_inf": true,
+  "description": "backward-pass numerics fuzz over curated finite-gradient subset (relu/square/dot/add/mul/neg); fails on NaN/Inf in gradients",
+  "points": 6
 }

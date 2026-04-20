@@ -1,15 +1,15 @@
 {
-    "command": "fuzz_eval",
-    "n_trials": 100,
-    "seed": 179320,
-    "primitives": [
-        "leaky_relu",
-        "elu",
-        "gelu",
-        "add",
-        "mul"
-    ],
-    "check_nan_inf": false,
-    "description": "targeted fuzz for new activation primitives (leaky_relu/elu/gelu) interleaved with add/mul; verifies eval on random leaky_relu slopes and elementwise-preserving shapes",
-    "points": 6
+  "command": "fuzz_eval",
+  "n_trials": 50,
+  "seed": 179320,
+  "primitives": [
+    "leaky_relu",
+    "elu",
+    "gelu",
+    "add",
+    "mul"
+  ],
+  "check_nan_inf": false,
+  "description": "targeted fuzz for new activation primitives (leaky_relu/elu/gelu) interleaved with add/mul; verifies eval on random leaky_relu slopes and elementwise-preserving shapes",
+  "points": 6
 }

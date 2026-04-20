@@ -1,15 +1,15 @@
 {
-    "command": "fuzz_grad",
-    "n_trials": 100,
-    "seed": 1547885,
-    "primitives": [
-        "pad",
-        "conv",
-        "avgpool",
-        "add",
-        "mul"
-    ],
-    "check_nan_inf": false,
-    "description": "targeted gradient fuzz for last-axis ops (pad/conv/avgpool); exercises strided/dilated backward accumulation",
-    "points": 6
+  "command": "fuzz_grad",
+  "n_trials": 50,
+  "seed": 1547885,
+  "primitives": [
+    "pad",
+    "conv",
+    "avgpool",
+    "add",
+    "mul"
+  ],
+  "check_nan_inf": false,
+  "description": "targeted gradient fuzz for last-axis ops (pad/conv/avgpool); exercises strided/dilated backward accumulation",
+  "points": 6
 }

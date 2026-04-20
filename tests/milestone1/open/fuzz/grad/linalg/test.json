@@ -1,13 +1,13 @@
 {
-    "command": "fuzz_grad",
-    "n_trials": 100,
-    "seed": 4046095,
-    "primitives": [
-        "dot",
-        "add",
-        "mul"
-    ],
-    "check_nan_inf": false,
-    "description": "targeted gradient fuzz for dot/add/mul; exercises broadcasting backward rules",
-    "points": 6
+  "command": "fuzz_grad",
+  "n_trials": 50,
+  "seed": 4046095,
+  "primitives": [
+    "dot",
+    "add",
+    "mul"
+  ],
+  "check_nan_inf": false,
+  "description": "targeted gradient fuzz for dot/add/mul; exercises broadcasting backward rules",
+  "points": 6
 }

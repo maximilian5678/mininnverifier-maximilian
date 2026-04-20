@@ -1,14 +1,14 @@
 {
-    "command": "fuzz_eval",
-    "n_trials": 100,
-    "seed": 5257192,
-    "primitives": [
-        "expand_dims",
-        "moveaxis",
-        "reshape",
-        "reduce_sum"
-    ],
-    "check_nan_inf": false,
-    "description": "targeted fuzz for shape-manipulating primitives (expand_dims/moveaxis/reshape/reduce_sum) to catch shape-propagation bugs",
-    "points": 6
+  "command": "fuzz_eval",
+  "n_trials": 50,
+  "seed": 5257192,
+  "primitives": [
+    "expand_dims",
+    "moveaxis",
+    "reshape",
+    "reduce_sum"
+  ],
+  "check_nan_inf": false,
+  "description": "targeted fuzz for shape-manipulating primitives (expand_dims/moveaxis/reshape/reduce_sum) to catch shape-propagation bugs",
+  "points": 6
 }

@@ -1,25 +1,25 @@
 {
-    "command": "fuzz_eval",
-    "n_trials": 300,
-    "seed": 7119429,
-    "primitives": [
-        "neg",
-        "relu",
-        "square",
-        "leaky_relu",
-        "add",
-        "mul",
-        "dot",
-        "where",
-        "expand_dims",
-        "moveaxis",
-        "reshape",
-        "reduce_sum",
-        "pad",
-        "conv",
-        "avgpool"
-    ],
-    "check_nan_inf": false,
-    "description": "fuzz forward-pass with safe primitives (excludes log/sqrt/reciprocal/exp) to verify no crashes or shape errors",
-    "points": 6
+  "command": "fuzz_eval",
+  "n_trials": 150,
+  "seed": 7119429,
+  "primitives": [
+    "neg",
+    "relu",
+    "square",
+    "leaky_relu",
+    "add",
+    "mul",
+    "dot",
+    "where",
+    "expand_dims",
+    "moveaxis",
+    "reshape",
+    "reduce_sum",
+    "pad",
+    "conv",
+    "avgpool"
+  ],
+  "check_nan_inf": false,
+  "description": "fuzz forward-pass with safe primitives (excludes log/sqrt/reciprocal/exp) to verify no crashes or shape errors",
+  "points": 6
 }

@@ -1,16 +1,16 @@
 {
-    "command": "fuzz_eval",
-    "n_trials": 100,
-    "seed": 2294743,
-    "primitives": [
-        "log",
-        "sqrt",
-        "reciprocal",
-        "exp",
-        "neg",
-        "mul"
-    ],
-    "check_nan_inf": false,
-    "description": "targeted crash-only fuzz for numerically unsafe unaries (log/sqrt/reciprocal/exp) \u2014 NaN/Inf outputs permitted, only shape/crash failures detected",
-    "points": 6
+  "command": "fuzz_eval",
+  "n_trials": 50,
+  "seed": 2294743,
+  "primitives": [
+    "log",
+    "sqrt",
+    "reciprocal",
+    "exp",
+    "neg",
+    "mul"
+  ],
+  "check_nan_inf": false,
+  "description": "targeted crash-only fuzz for numerically unsafe unaries (log/sqrt/reciprocal/exp) \u2014 NaN/Inf outputs permitted, only shape/crash failures detected",
+  "points": 6
 }

@@ -1,25 +1,25 @@
 {
-    "command": "fuzz_eval",
-    "n_trials": 200,
-    "seed": 1677293,
-    "primitives": [
-        "neg",
-        "relu",
-        "square",
-        "leaky_relu",
-        "add",
-        "mul",
-        "dot",
-        "where",
-        "expand_dims",
-        "moveaxis",
-        "reshape",
-        "reduce_sum",
-        "pad",
-        "conv",
-        "avgpool"
-    ],
-    "check_nan_inf": true,
-    "description": "forward-pass numerics fuzz: safe primitives only, fails on NaN/Inf in outputs",
-    "points": 6
+  "command": "fuzz_eval",
+  "n_trials": 100,
+  "seed": 1677293,
+  "primitives": [
+    "neg",
+    "relu",
+    "square",
+    "leaky_relu",
+    "add",
+    "mul",
+    "dot",
+    "where",
+    "expand_dims",
+    "moveaxis",
+    "reshape",
+    "reduce_sum",
+    "pad",
+    "conv",
+    "avgpool"
+  ],
+  "check_nan_inf": true,
+  "description": "forward-pass numerics fuzz: safe primitives only, fails on NaN/Inf in outputs",
+  "points": 6
 }

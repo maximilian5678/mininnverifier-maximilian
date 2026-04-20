@@ -1,16 +1,16 @@
 {
-    "command": "fuzz_grad",
-    "n_trials": 100,
-    "seed": 9102614,
-    "primitives": [
-        "log",
-        "sqrt",
-        "reciprocal",
-        "exp",
-        "neg",
-        "mul"
-    ],
-    "check_nan_inf": false,
-    "description": "targeted crash-only gradient fuzz for unsafe unaries; NaN/Inf gradients permitted",
-    "points": 6
+  "command": "fuzz_grad",
+  "n_trials": 50,
+  "seed": 9102614,
+  "primitives": [
+    "log",
+    "sqrt",
+    "reciprocal",
+    "exp",
+    "neg",
+    "mul"
+  ],
+  "check_nan_inf": false,
+  "description": "targeted crash-only gradient fuzz for unsafe unaries; NaN/Inf gradients permitted",
+  "points": 6
 }

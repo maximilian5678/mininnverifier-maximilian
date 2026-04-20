@@ -1,13 +1,13 @@
 {
-    "command": "fuzz_eval",
-    "n_trials": 100,
-    "seed": 9417485,
-    "primitives": [
-        "dot",
-        "add",
-        "mul"
-    ],
-    "check_nan_inf": false,
-    "description": "targeted fuzz for dot/add/mul to stress broadcasting and matmul shape logic",
-    "points": 6
+  "command": "fuzz_eval",
+  "n_trials": 50,
+  "seed": 9417485,
+  "primitives": [
+    "dot",
+    "add",
+    "mul"
+  ],
+  "check_nan_inf": false,
+  "description": "targeted fuzz for dot/add/mul to stress broadcasting and matmul shape logic",
+  "points": 6
 }

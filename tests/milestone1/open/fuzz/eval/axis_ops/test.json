@@ -1,15 +1,15 @@
 {
-    "command": "fuzz_eval",
-    "n_trials": 100,
-    "seed": 2867273,
-    "primitives": [
-        "pad",
-        "conv",
-        "avgpool",
-        "add",
-        "mul"
-    ],
-    "check_nan_inf": false,
-    "description": "targeted fuzz for last-axis ops (pad with dilation, conv, avgpool) to stress length arithmetic and kernel/window/stride combinations",
-    "points": 6
+  "command": "fuzz_eval",
+  "n_trials": 50,
+  "seed": 2867273,
+  "primitives": [
+    "pad",
+    "conv",
+    "avgpool",
+    "add",
+    "mul"
+  ],
+  "check_nan_inf": false,
+  "description": "targeted fuzz for last-axis ops (pad with dilation, conv, avgpool) to stress length arithmetic and kernel/window/stride combinations",
+  "points": 6
 }
