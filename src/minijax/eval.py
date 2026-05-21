@@ -1,6 +1,7 @@
 # Copyright (c) 2025 by David Boetius
-# Licensed under the MIT Licensed.
+# Licensed under the MIT License.
 import numpy as np
+import scipy.special as special
 
 from . import core
 
@@ -52,6 +53,29 @@ def np_dot(x, y):  # np.dot doesn't broadcast
         return np.dot(x, y)
     return np.einsum("...j,...jk", x, y)
 
+def np_pad(x, config, axes, value):
+    # Left, right, and middle padding
+    l, r, m = config
+    ndim = x.ndim 
+    axes = [a % ndim for a in axes]
+
+    # If interior padding is needed
+    if m > 0:
+        for ax in axes:
+            new_shape = list(x.shape)
+            new_shape[ax] = x.shape[ax] + (x.shape[ax] - 1) * m
+            result = np.full(new_shape, value, dtype=x.dtype)
+            # Fill only every (m+1)-th index
+            idx = [slice(None)] * ndim
+            idx[ax] = slice(None, None, m + 1)
+            result[tuple(idx)] = x
+            x = result
+        # Left Right padding
+    pad_width = [(0, 0)] * ndim
+    for ax in axes:
+        pad_width[ax] = (l, r)
+    return np.pad(x, pad_width, constant_values=value)
+
 
 eval_rules = {
     core.expand_dims: lambda x, axes: np.expand_dims(x, axes),
@@ -69,4 +93,11 @@ eval_rules = {
     core.exp: np.exp,
     core.log: np.log,
     core.where: np.where,
+    # Activation Functions
+    core.leaky_relu: lambda x, slope: np.where(x >= 0, x, slope * x),
+    core.elu: lambda x: np.where(x >= 0, x, np.exp(x) - 1),
+    core.gelu: lambda x: x * 0.5 * (1 + special.erf(x / np.sqrt(2))),
+    core.normalcdf: lambda x: 0.5 * (1 + special.erf(x / np.sqrt(2))),
+    core.ge: lambda x, y: x >= y,
+    core.pad: lambda x, config, axes, value: np_pad(x, config, axes, value),
 }

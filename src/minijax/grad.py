@@ -4,6 +4,8 @@ from . import core
 from .compute_graph import make_graph
 from .eval import Array, zeros
 from .nested_containers import flatten, unflatten
+import scipy.special as special
+import numpy as np
 
 
 def grad(fn):
@@ -100,6 +102,30 @@ def vjp_where(tangent, out, cond, true_val, false_val):
     zero = zeros(cond.shape)
     return (zero, core.where(cond, tangent, zero), core.where(cond, zero, tangent))
 
+def np_unpad(t, config, axes, original_shape):
+    l, r, m = config
+    ndim = t.ndim
+    axes = [a % ndim for a in axes]
+    
+    result = t.array
+    
+    # left/right cutoff
+    idx = [slice(None)] * ndim
+    for ax in axes:
+        s = result.shape[ax]
+        idx[ax] = slice(l, s - r if r > 0 else None)
+    result = result[tuple(idx)]
+    
+    # interior padding cutoff
+    if m > 0:
+        for ax in axes:
+            idx = [slice(None)] * ndim
+            idx[ax] = slice(None, None, m + 1)
+            result = result[tuple(idx)]
+    
+    return broadcast_to(Array(result), Array(np.zeros(original_shape)))
+
+
 
 vjp_rules = {
     core.expand_dims: lambda t, _, x, axes: core.reduce_sum(t, axes),
@@ -117,4 +143,13 @@ vjp_rules = {
     core.exp: lambda t, out, x: t * out,
     core.log: lambda t, _, x: t / x,
     core.where: vjp_where,
+    # Activation Functions
+    core.leaky_relu: lambda t, out, x, slope: core.where(core.ge(x, Array(0)), t, Array(slope) * t),
+    core.elu: lambda t, out, x: core.where(core.ge(x, Array(0)), t, (out + Array(1)) * t),
+    core.gelu: lambda t, _, x: t * Array(
+        0.5 * (1 + special.erf(x.array / np.sqrt(2))) 
+        + x.array * np.exp(-0.5 * x.array**2) / np.sqrt(2 * np.pi)
+    ),
+    core.normalcdf: lambda t, _, x: t * Array(np.exp(-0.5 * x.array**2) / np.sqrt(2 * np.pi)),
+    core.pad: lambda t, _, x, config, axes, value: np_unpad(t, config, axes, x.shape),
 }
