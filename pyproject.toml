@@ -5,7 +5,7 @@ description = "A minimal neural network verifier for educational purposes."
 readme = "README.md"
 authors = [{ name = "David Boetius", email = "david.boetius@uni-konstanz.de" }]
 requires-python = ">=3.14"
-dependencies = ["numpy >= 2.0, <3.0"]
+dependencies = ["numpy >= 2.0, <2.4", "scipy >= 1.11, < 2.0"]
 
 [project.optional-dependencies]
 demos = [

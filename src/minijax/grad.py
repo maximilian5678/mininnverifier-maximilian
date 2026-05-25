@@ -125,6 +125,73 @@ def np_unpad(t, config, axes, original_shape):
     
     return broadcast_to(Array(result), Array(np.zeros(original_shape)))
 
+def vjp_conv(t, _, x, k, stride):
+    """
+    t: (N, Cout, H_out, W_out) out_tangent (Array)
+    x: (N, Cin, H, W) primal input (Array)
+    k: (Cout, Cin, kH, kW) primal kernel (Array)
+    """
+    t_np = t.array
+    x_np = x.array
+    k_np = k.array
+
+    N, _, H, W = x_np.shape
+    Cout, _, kH, kW = k_np.shape
+    _, _, H_out, W_out = t_np.shape
+
+    x_windows = np.lib.stride_tricks.sliding_window_view(x_np, (kH, kW), axis=(2, 3))
+    x_windows = x_windows[:, :, ::stride, ::stride, :, :]
+    dk = np.einsum("nchwij,nohw->ocij", x_windows, t_np)
+
+    if stride > 1:
+        t_dil = np.zeros(
+            (N, Cout, (H_out - 1) * stride + 1, (W_out - 1) * stride + 1),
+            dtype=t_np.dtype,
+        )
+        t_dil[:, :, ::stride, ::stride] = t_np
+    else:
+        t_dil = t_np
+
+    pad_top = kH - 1
+    pad_left = kW - 1
+    pad_bottom = H - (H_out - 1) * stride - 1 + (kH - 1) - pad_top
+    pad_right = W - (W_out - 1) * stride - 1 + (kW - 1) - pad_left
+    pad_bottom = H + kH - 2 - (H_out - 1) * stride - pad_top
+    pad_right = W + kW - 2 - (W_out - 1) * stride - pad_left
+
+    t_padded = np.pad(
+        t_dil,
+        ((0, 0), (0, 0), (pad_top, pad_bottom), (pad_left, pad_right)),
+    )
+
+    k_flipped = k_np[:, :, ::-1, ::-1]
+    t_windows = np.lib.stride_tricks.sliding_window_view(t_padded, (kH, kW), axis=(2, 3))
+    dx = np.einsum("nohwij,ocij->nchw", t_windows, k_flipped)
+    return Array(dx), Array(dk)
+
+def vjp_avgpool(t, _, x, window_size, stride):
+    """
+    t: out_tangent, shape = output shape (Array)
+    x: primal input (Array)
+    window_size
+    stride
+    """
+    t_np = t.array
+    x_np = x.array
+    ndim = x_np.ndim
+
+    window_volume = int(np.prod(window_size))
+    dx = np.zeros_like(x_np)
+    t_scaled = t_np / window_volume
+
+    for offset in np.ndindex(*window_size):
+        slicer = tuple(
+            slice(offset[i], offset[i] + stride[i] * t_np.shape[i], stride[i])
+            for i in range(ndim)
+        )
+        dx[slicer] += t_scaled
+
+    return Array(dx)
 
 
 vjp_rules = {
@@ -137,7 +204,7 @@ vjp_rules = {
     core.dot: vjp_dot,
     core.mul: lambda t, _, x, y: (t * y, x * t),
     core.reciprocal: lambda t, _, x: -core.reciprocal(core.square(x)) * t,
-    core.relu: lambda t, out, x: core.where(out, t, Array(0)),  # np.bool_(0) = False
+    core.relu: lambda t, out, x: core.where(out, t, Array(0)),
     core.square: lambda t, _, x: t * Array(2) * x,
     core.sqrt: lambda t, _, x: t / (Array(2) * core.sqrt(x)),
     core.exp: lambda t, out, x: t * out,
@@ -152,4 +219,6 @@ vjp_rules = {
     ),
     core.normalcdf: lambda t, _, x: t * Array(np.exp(-0.5 * x.array**2) / np.sqrt(2 * np.pi)),
     core.pad: lambda t, _, x, config, axes, value: np_unpad(t, config, axes, x.shape),
+    core.conv: vjp_conv,
+    core.avgpool: vjp_avgpool,
 }

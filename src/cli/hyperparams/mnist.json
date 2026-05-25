@@ -1,0 +1,9 @@
+{
+    "in_size": 784,
+    "layer_sizes": [512, 256, 128, 10],
+    "num_epochs": 25,
+    "batch_size": 128,
+    "learning_rate": 1e-3,
+    "eval_batch_size": 10000,
+    "rng_key": 0
+}

@@ -54,6 +54,8 @@ def np_dot(x, y):  # np.dot doesn't broadcast
     return np.einsum("...j,...jk", x, y)
 
 def np_pad(x, config, axes, value):
+    if len(axes) == 0:
+        return x
     # Left, right, and middle padding
     l, r, m = config
     ndim = x.ndim 
@@ -75,6 +77,39 @@ def np_pad(x, config, axes, value):
     for ax in axes:
         pad_width[ax] = (l, r)
     return np.pad(x, pad_width, constant_values=value)
+
+def np_conv(x, k, stride):
+    """
+    input x: (N, Cin, H, W)
+    kernal k: (Cout, Cin, kH, kW)
+    """
+    N, Cin, H, W = x.shape
+    Cout, Cin_k, kH, kW = k.shape
+    assert Cin == Cin_k, f"Channel mismatch: input Cin={Cin}, kernel Cin={Cin_k}"
+
+    # Compute output dimensions
+    #H_out = (H - kH) // stride + 1
+    #W_out = (W - kW) // stride + 1
+
+    # Extract sliding windows
+    windows = np.lib.stride_tricks.sliding_window_view(x, (kH, kW), axis=(2, 3))
+    windows = windows[:, :, ::stride, ::stride, :, :]
+
+    # Perform convolution
+    out = np.einsum("nchwij,ocij->nohw", windows, k)
+    return out
+
+def np_avgpool(x, window_size, stride):
+    assert len(window_size) == x.ndim
+    assert len(stride) == x.ndim
+
+    windows = np.lib.stride_tricks.sliding_window_view(x, window_size)
+
+    slicer = tuple(slice(None, None, stride[i]) for i in range(x.ndim))
+    windows = windows[slicer]
+
+    window_axes = tuple(range(x.ndim, 2 * x.ndim))
+    return windows.mean(axis=window_axes)
 
 
 eval_rules = {
@@ -100,4 +135,6 @@ eval_rules = {
     core.normalcdf: lambda x: 0.5 * (1 + special.erf(x / np.sqrt(2))),
     core.ge: lambda x, y: x >= y,
     core.pad: lambda x, config, axes, value: np_pad(x, config, axes, value),
+    core.conv: lambda x, k, stride: np_conv(x, k, stride),
+    core.avgpool: lambda x, window_size, stride: np_avgpool(x, window_size, stride),
 }

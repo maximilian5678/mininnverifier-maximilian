@@ -132,14 +132,20 @@ def main():
     learning_rate = cfg["learning_rate"]
     eval_batch_size = cfg["eval_batch_size"]
     rng_key = cfg["rng_key"]
-    num_classes = layer_sizes[-1]
-
+    
     # Load data
     images = np.fromfile(args.images, dtype=np.float64)
     labels = np.fromfile(args.labels, dtype=np.float64)
     num_samples = images.size // in_size
     images = images.reshape(num_samples, in_size)
+
+    # num_classes aus den tatsächlichen Labels ableiten (kann 5 oder 10 sein)
+    num_classes = labels.size // num_samples
     labels = labels.reshape(num_samples, num_classes)
+
+    # Output-Layer an die tatsächliche Klassenzahl anpassen
+    layer_sizes = list(layer_sizes)
+    layer_sizes[-1] = num_classes
 
     # Model setup
     params = init_mlp(in_size, layer_sizes, rng_key=rng_key)
@@ -170,6 +176,8 @@ def main():
     for epoch in range(1, num_epochs + 1):
         rand_perm = np_rng.permutation(num_samples)
         for batch_idx in it.batched(rand_perm, batch_size):
+            if len(batch_idx) != batch_size:
+                continue
             x = Array(images[batch_idx, :])
             y = Array(labels[batch_idx, :])
             params, opt_state, loss_val = train_step(x, y, params, opt_state)

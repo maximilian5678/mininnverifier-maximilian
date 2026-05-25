@@ -108,6 +108,8 @@ gelu = Primitive("gelu", 1)
 normalcdf = Primitive("normalcdf", 1)
 ge = Primitive("ge", 2) # greater than or equal to
 pad = Primitive("pad", 1, ("config", "axes", "value",))
+conv = Primitive("conv", 2, ("stride",))
+avgpool = Primitive("avgpool", 1, ("window_size", "stride"))
 
 
 def sub(x, y):
