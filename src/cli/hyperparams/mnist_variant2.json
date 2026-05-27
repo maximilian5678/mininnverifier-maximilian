@@ -1,9 +1,11 @@
 {
+    "model": "conv",
     "in_size": 784,
-    "layer_sizes": [256, 128, 10],
-    "num_epochs": 40,
+    "conv_specs": [[16, 3, 3, 1, 1, 2], [32, 3, 3, 1, 1, 2]],
+    "dense_sizes": [64],
+    "num_epochs": 30,
     "batch_size": 64,
-    "learning_rate": 5e-4,
+    "learning_rate": 1e-3,
     "eval_batch_size": 624,
-    "rng_key": 3
+    "rng_key": 0
 }
