@@ -62,8 +62,7 @@ def kaiming_uniform(shape, fan_in, rng_key):
 
 
 # ======================================================================================================================
-# ConvNet — operates on full batch (N, 784), no vmap needed
-# arch is a list of static dicts (not differentiable), params has only Arrays
+# ConvNet
 # ======================================================================================================================
 
 
@@ -104,9 +103,6 @@ def init_conv_net(conv_specs, dense_sizes, num_classes, rng_key, in_hw=28):
     conv_specs: list of [Cout, kH, kW, stride, pad, pool]
     dense_sizes: list of hidden dense sizes before the output layer
     num_classes: number of output classes
-
-    params contains only differentiable Arrays (no ints).
-    arch contains the static layout dicts — pass both to conv_net().
     """
     n_layers = len(conv_specs) + len(dense_sizes) + 1
     keys = split_rng_key(rng_key, n_layers)
