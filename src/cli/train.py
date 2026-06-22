@@ -135,7 +135,6 @@ def main():
     num_samples = images.size // in_size
     images = images.reshape(num_samples, in_size)
 
-    # num_classes aus den tatsächlichen Labels ableiten (kann 5 oder 10 sein)
     num_classes = labels.size // num_samples
     labels = labels.reshape(num_samples, num_classes)
 
@@ -151,7 +150,6 @@ def main():
         def loss(x, y_true, params):
             return cross_entropy(forward(x, params), y_true)
 
-        # ConvNet VJP uses direct numpy — cannot trace under jit, run eager
         def train_step(x, y_true, params, opt_state):
             loss_val, (_, _, param_grads) = value_and_grad(loss)(x, y_true, params)
             new_params, new_opt_state = adam(params, param_grads, opt_state, lr=learning_rate)
