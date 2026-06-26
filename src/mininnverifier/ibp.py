@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 import numpy as np
+import scipy.special as special
 
 from minijax import core
 from minijax.core import Value, abs
@@ -31,7 +32,6 @@ def ibp(fn):
         return map_structure(lambda ibp_val: Box(ibp_val.lb, ibp_val.ub), out_bounds)
 
     return ibp_fn
-
 
 class IBPValue(core.Value):
     def __init__(self, interpreter, lb, ub, is_point=False):
@@ -81,6 +81,8 @@ def ibp_monotonic_non_increasing(fn, *args, **options):
 
 def ibp_linear(fn, x, y, **options):
     if not x.is_point and not y.is_point:
+        if fn is core.mul:
+            return ibp_mul_box_box(x, y)
         raise NotImplementedError(f"No IBP rule for bilinear application of primitive {fn}")
     elif x.is_point:
         x = x.lb
@@ -106,9 +108,53 @@ def ibp_where(cond, x, y):
     out_ub = np.maximum(x.ub.array, y.ub.array)
     return Array(out_lb), Array(out_ub)
 
+GELU_ARGMIN = -0.7517913647329811
+GELU_MIN = -0.1699712074798982
+
+def _gelu_np(x):
+    return x * 0.5 * (1.0 + special.erf(x / np.sqrt(2.0)))
+
+def ibp_gelu(x):
+    lb, ub = x.lb.array, x.ub.array
+    g_lb, g_ub = _gelu_np(lb), _gelu_np(ub)
+    out_ub = np.maximum(g_lb, g_ub)
+    contains_min = (lb <= GELU_ARGMIN) & (ub >= GELU_ARGMIN)
+    out_lb = np.where(contains_min, GELU_MIN, np.minimum(g_lb, g_ub))
+    return Array(out_lb), Array(out_ub)
+
+def ibp_mul_box_box(x, y):
+    xl, xu = x.lb.array, x.ub.array
+    yl, yu = y.lb.array, y.ub.array
+    p1, p2, p3, p4 = xl * yl, xl * yu, xu * yl, xu * yu
+    out_lb = np.minimum(np.minimum(p1, p2), np.minimum(p3, p4))
+    out_ub = np.maximum(np.maximum(p1, p2), np.maximum(p3, p4))
+    return Array(out_lb), Array(out_ub)
+
+def ibp_conv(x, k, **options):
+    if not k.is_point:
+        raise NotImplementedError("conv with non-constant kernel not supported")
+    x_mid = (x.ub + x.lb) * Array(0.5)
+    x_ran = (x.ub - x.lb) * Array(0.5)
+    kernel = k.lb
+    out_mid = core.conv(x_mid, kernel, **options)
+    out_ran = core.conv(x_ran, abs(kernel), **options)
+    return out_mid - out_ran, out_mid + out_ran
+
+def ibp_reciprocal(x):
+    lb, ub = x.lb.array, x.ub.array
+    straddles = (lb <= 0.0) & (ub >= 0.0)
+    with np.errstate(divide="ignore"):
+        r_lb, r_ub = 1.0 / ub, 1.0 / lb        # reciprocal ist monoton fallend, wenn kein Straddle
+    out_lb = np.where(straddles, -np.inf, np.minimum(r_lb, r_ub))
+    out_ub = np.where(straddles,  np.inf, np.maximum(r_lb, r_ub))
+    return Array(out_lb), Array(out_ub)
+
 custom_primitives = {
     core.square: ibp_square,
     core.where: ibp_where,
+    core.gelu: ibp_gelu,
+    core.conv: ibp_conv,
+    core.reciprocal: ibp_reciprocal,
 }
 
 mono_non_dec_primitives = {
@@ -121,6 +167,11 @@ mono_non_dec_primitives = {
     core.exp,
     core.sqrt, 
     core.log,
+    core.leaky_relu, 
+    core.elu, 
+    core.normalcdf, 
+    core.avgpool, 
+    core.pad,
 }
-mono_non_inc_primitives = {core.neg, core.reciprocal}
+mono_non_inc_primitives = {core.neg}
 linear_primitives = {core.dot, core.mul}
