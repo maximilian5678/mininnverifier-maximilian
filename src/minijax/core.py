@@ -12,6 +12,7 @@ class Value(ABC):
 
     @property
     def ndim(self):
+        """Return the number of dimensions of this value."""
         return len(self.shape)
 
     def __neg__(self):
@@ -100,6 +101,16 @@ moveaxis = Primitive("moveaxis", 1, ("source", "destination"))
 reshape = Primitive("reshape", 1, ("new_shape",))
 reduce_sum = ReduceSumPrimitive()
 
+# Primitive Activation Functions
+leaky_relu = Primitive("leaky_relu", 1, ("slope",))
+elu = Primitive("elu", 1)
+gelu = Primitive("gelu", 1)
+normalcdf = Primitive("normalcdf", 1)
+ge = Primitive("ge", 2) # greater than or equal to
+pad = Primitive("pad", 1, ("config", "axes", "value",))
+conv = Primitive("conv", 2, ("stride",))
+avgpool = Primitive("avgpool", 1, ("window_size", "stride"))
+
 
 def sub(x, y):
     return add(x, neg(y))
@@ -109,9 +120,8 @@ def div(x, y):
     return mul(x, reciprocal(y))
 
 
-def abs(x):
-    return add(relu(x), relu(neg(x)))
-
-
 def transpose(x):
     return moveaxis(x, -1, -2)
+
+def abs(x):
+    return add(relu(x), relu(neg(x)))

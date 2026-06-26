@@ -28,7 +28,7 @@ from minijax.eval import Array, zeros
 from minijax.grad import value_and_grad
 from minijax.jit import jit
 from minijax.nested_containers import map_structure
-from minijax.nn import cross_entropy, init_mlp, mlp
+from minijax.nn import conv_net, cross_entropy, init_conv_net, init_mlp, mlp
 from minijax.serialize import dump
 from minijax.vmap import vmap
 
@@ -94,16 +94,12 @@ def init_adam_state(params):
 # ---------------------------------------------------------------------------
 
 
-def save_checkpoint(params, batched_model, output_dir, epoch, eval_batch_size, in_size):
-    """Save a model checkpoint as a .mininn file using the closure pattern.
-
-    The saved graph has a single input variable (x) with shape
-    (eval_batch_size, in_size). Model parameters are embedded as constants.
-    """
+def save_checkpoint(params, forward_fn, output_dir, epoch, eval_batch_size, in_size):
+    """Save a model checkpoint as a .mininn file using the closure pattern."""
     dummy_x = zeros((eval_batch_size, in_size))
 
     def model_fn(x):
-        return batched_model(x, params)
+        return forward_fn(x, params)
 
     graph = make_graph(model_fn)(dummy_x)
     path = output_dir / f"checkpoint_epoch_{epoch}.mininn"
@@ -126,36 +122,56 @@ def main():
 
     cfg = load_hyperparams(args.dataset)
     in_size = cfg["in_size"]
-    layer_sizes = cfg["layer_sizes"]
     num_epochs = cfg["num_epochs"]
     batch_size = cfg["batch_size"]
     learning_rate = cfg["learning_rate"]
     eval_batch_size = cfg["eval_batch_size"]
     rng_key = cfg["rng_key"]
-    num_classes = layer_sizes[-1]
+    model_type = cfg.get("model", "mlp")
 
     # Load data
     images = np.fromfile(args.images, dtype=np.float64)
     labels = np.fromfile(args.labels, dtype=np.float64)
     num_samples = images.size // in_size
     images = images.reshape(num_samples, in_size)
+
+    num_classes = labels.size // num_samples
     labels = labels.reshape(num_samples, num_classes)
 
     # Model setup
-    params = init_mlp(in_size, layer_sizes, rng_key=rng_key)
-    model = vmap(mlp, (0, None))
+    if model_type == "conv":
+        conv_specs = [tuple(s) for s in cfg["conv_specs"]]
+        dense_sizes = cfg.get("dense_sizes", [])
+        params, arch = init_conv_net(conv_specs, dense_sizes, num_classes, rng_key=rng_key)
 
-    def loss(x, y_true, params):
-        y_pred = model(x, params)
-        return cross_entropy(y_pred, y_true)
+        def forward(x, params):
+            return conv_net(x, params, arch)
 
-    @jit
-    def train_step(x, y_true, params, opt_state):
-        loss_val, (_, _, param_grads) = value_and_grad(loss)(x, y_true, params)
-        new_params, new_opt_state = adam(
-            params, param_grads, opt_state, lr=learning_rate
-        )
-        return new_params, new_opt_state, loss_val
+        def loss(x, y_true, params):
+            return cross_entropy(forward(x, params), y_true)
+
+        def train_step(x, y_true, params, opt_state):
+            loss_val, (_, _, param_grads) = value_and_grad(loss)(x, y_true, params)
+            new_params, new_opt_state = adam(params, param_grads, opt_state, lr=learning_rate)
+            return new_params, new_opt_state, loss_val
+
+    else:
+        layer_sizes = list(cfg["layer_sizes"])
+        layer_sizes[-1] = num_classes
+        params = init_mlp(in_size, layer_sizes, rng_key=rng_key)
+        _model = vmap(mlp, (0, None))
+
+        def forward(x, params):
+            return _model(x, params)
+
+        def loss(x, y_true, params):
+            return cross_entropy(forward(x, params), y_true)
+
+        @jit
+        def train_step(x, y_true, params, opt_state):
+            loss_val, (_, _, param_grads) = value_and_grad(loss)(x, y_true, params)
+            new_params, new_opt_state = adam(params, param_grads, opt_state, lr=learning_rate)
+            return new_params, new_opt_state, loss_val
 
     # Output directory
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -170,13 +186,15 @@ def main():
     for epoch in range(1, num_epochs + 1):
         rand_perm = np_rng.permutation(num_samples)
         for batch_idx in it.batched(rand_perm, batch_size):
+            if len(batch_idx) != batch_size:
+                continue
             x = Array(images[batch_idx, :])
             y = Array(labels[batch_idx, :])
             params, opt_state, loss_val = train_step(x, y, params, opt_state)
 
         # Save checkpoint after each epoch
         cp_path = save_checkpoint(
-            params, model, args.output_dir, epoch, eval_batch_size, in_size
+            params, forward, args.output_dir, epoch, eval_batch_size, in_size
         )
         print(cp_path)
 
