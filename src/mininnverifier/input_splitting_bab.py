@@ -2,37 +2,31 @@
 # Licensed under the MIT License.
 import numpy as np
 
-from minijax.core import reshape, where
 from minijax.eval import Array
 
 from .ibp import ibp, Box
 
 
 def split_longest_edge(branch: Box):
-    lb, ub = branch.lb, branch.ub
-    lb_flat = reshape(lb, new_shape=(-1,))
-    ub_flat = reshape(ub, new_shape=(-1,))
-    numel = lb_flat.shape[0]  # number of elements
+    """Split the box along its widest dimension into two halves."""
+    lb = branch.lb.array.reshape(-1)
+    ub = branch.ub.array.reshape(-1)
+    index = int((ub - lb).argmax()) # dimension with the widest edge
+    mid = 0.5 * (lb[index] + ub[index])
 
-    # Find argument with longest edge
-    ranges = ub_flat - lb_flat
-    longest_edge, index = ranges[0].item(), 0
-    for i in range(1, numel):
-        ran = ranges[i].item()
-        if ran > longest_edge:
-            longest_edge, index = ran, i
+    left_ub = ub.copy()
+    left_ub[index] = mid
+    right_lb = lb.copy()
+    right_lb[index] = mid
 
-    mid = (ub_flat + lb_flat) / 2.0
-    mask = Array(np.arange(numel) == index)
-    left_ub = where(mask, mid, ub_flat)
-    right_lb = where(mask, mid, lb_flat)
-
-    left_ub = reshape(left_ub, ub.shape)
-    right_lb = reshape(right_lb, ub.shape)
-    return Box(lb, left_ub), Box(right_lb, ub)
+    shape = branch.lb.array.shape
+    left = Box(branch.lb, Array(left_ub.reshape(shape)))
+    right = Box(Array(right_lb.reshape(shape)), branch.ub)
+    return left, right
 
 
 def pick_worst_lb(branches):
+    """Index of the branch with the smallest (most negative) lower bound."""
     min_lb, selected = branches[0][0], 0
     for i in range(1, len(branches)):
         lb, _ = branches[i]
@@ -42,23 +36,20 @@ def pick_worst_lb(branches):
 
 
 def input_splitting_bab(fn, split=split_longest_edge, compute_bounds=ibp):
-    # Verify whether fn(x) >= 0 for all x in x_bounds
-    # Compare with https://jmlr.org/papers/v21/19-468.html
+    # Verify whether fn(x) >= 0 for all x in x_bounds.
     compute_bounds = compute_bounds(fn)
 
     def bab_fn(x_bounds: Box):
         branches = [(-np.inf, x_bounds)]
-        while len(branches) > 0:
-            branch_i = pick_worst_lb(branches)
-            _, branch = branches.pop(branch_i)
-            children = split(branch)
-            for child_branch in children:
-                child_bounds = compute_bounds(child_branch)
-                child_lb, child_ub = child_bounds.lb.item(), child_bounds.ub.item()
+        while branches:
+            branch = branches.pop(pick_worst_lb(branches))[1]
+            for child in split(branch):
+                cb = compute_bounds(child)
+                child_lb, child_ub = cb.lb.item(), cb.ub.item()
                 if child_ub < 0:
-                    return (child_branch.ub + child_branch.lb) / 2
+                    mid = 0.5 * (child.lb.array + child.ub.array)
+                    return Array(mid)
                 if child_lb < 0:
-                    branches.append((child_lb, child_branch))
-        return None  # Verified
-
+                    branches.append((child_lb, child))
+        return None  # verified
     return bab_fn

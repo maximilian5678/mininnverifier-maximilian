@@ -911,7 +911,6 @@ version = "0.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
-    { name = "scipy" },
 ]
 
 [package.optional-dependencies]
@@ -930,7 +929,6 @@ requires-dist = [
     { name = "matplotlib", marker = "extra == 'demos'", specifier = ">=3.0,<4.0" },
     { name = "numpy", specifier = ">=2.0,<3.0" },
     { name = "scikit-learn", marker = "extra == 'demos'", specifier = ">=1.8.0,<2.0" },
-    { name = "scipy", specifier = ">=1.0,<2.0" },
     { name = "testrunner", marker = "extra == 'tests'", editable = "tests/testrunner" },
 ]
 provides-extras = ["demos", "tests"]

@@ -2,6 +2,8 @@
 # Licensed under the MIT License.
 from dataclasses import dataclass
 
+import numpy as np
+
 from minijax import core
 from minijax.core import Value, abs
 from minijax.nested_containers import flatten, map_structure
@@ -52,7 +54,9 @@ class IBPInterpreter(core.Interpreter[IBPValue]):
             res = primitive(*[v.lb for v in values], **options)
             return IBPValue(self, res, res, is_point=True)
 
-        if primitive in mono_non_dec_primitives:
+        if primitive in custom_primitives:
+            out_lb, out_ub = custom_primitives[primitive](*values, **options)
+        elif primitive in mono_non_dec_primitives:
             out_lb, out_ub = ibp_monotonic_non_decreasing(primitive, *values, **options)
         elif primitive in mono_non_inc_primitives:
             out_lb, out_ub = ibp_monotonic_non_increasing(primitive, *values, **options)
@@ -72,7 +76,7 @@ def ibp_monotonic_non_decreasing(fn, *args, **options):
 
 def ibp_monotonic_non_increasing(fn, *args, **options):
     out_ub, out_lb = ibp_monotonic_non_decreasing(fn, *args, **options)
-    return out_lb, out_ub  # swaped from ibp_monotonic_non_decreasing
+    return out_lb, out_ub
 
 
 def ibp_linear(fn, x, y, **options):
@@ -88,6 +92,24 @@ def ibp_linear(fn, x, y, **options):
     elif y.is_point:
         return ibp_linear(lambda y, x: fn(x, y, **options), y, x)
 
+def ibp_square(x):
+    lb, ub = x.lb.array, x.ub.array
+    sq_lb, sq_ub = lb * lb, ub * ub
+    out_ub = np.maximum(sq_lb, sq_ub)
+    straddles = (lb <= 0.0) & (ub >= 0.0)
+    out_lb = np.where(straddles, 0.0, np.minimum(sq_lb, sq_ub))
+    return Array(out_lb), Array(out_ub)
+
+
+def ibp_where(cond, x, y):
+    out_lb = np.minimum(x.lb.array, y.lb.array)
+    out_ub = np.maximum(x.ub.array, y.ub.array)
+    return Array(out_lb), Array(out_ub)
+
+custom_primitives = {
+    core.square: ibp_square,
+    core.where: ibp_where,
+}
 
 mono_non_dec_primitives = {
     core.expand_dims,
@@ -97,6 +119,8 @@ mono_non_dec_primitives = {
     core.reduce_sum,
     core.relu,
     core.exp,
+    core.sqrt, 
+    core.log,
 }
-mono_non_inc_primitives = {core.neg}
+mono_non_inc_primitives = {core.neg, core.reciprocal}
 linear_primitives = {core.dot, core.mul}
