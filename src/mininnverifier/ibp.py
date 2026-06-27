@@ -104,8 +104,15 @@ def ibp_square(x):
 
 
 def ibp_where(cond, x, y):
-    out_lb = np.minimum(x.lb.array, y.lb.array)
-    out_ub = np.maximum(x.ub.array, y.ub.array)
+    cl, cu = cond.lb.array, cond.ub.array
+    xl, xu = x.lb.array, x.ub.array
+    yl, yu = y.lb.array, y.ub.array
+
+    sure_true  = cl > 0.0
+    sure_false = cu <= 0.0
+
+    out_lb = np.where(sure_true, xl, np.where(sure_false, yl, np.minimum(xl, yl)))
+    out_ub = np.where(sure_true, xu, np.where(sure_false, yu, np.maximum(xu, yu)))
     return Array(out_lb), Array(out_ub)
 
 GELU_ARGMIN = -0.7517913647329811
