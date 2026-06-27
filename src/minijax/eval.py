@@ -111,6 +111,18 @@ def np_avgpool(x, window_size, stride):
     window_axes = tuple(range(x.ndim, 2 * x.ndim))
     return windows.mean(axis=window_axes)
 
+def np_sumpool(x, window_size, stride):
+    assert len(window_size) == x.ndim
+    assert len(stride) == x.ndim
+
+    windows = np.lib.stride_tricks.sliding_window_view(x, window_size)
+
+    slicer = tuple(slice(None, None, stride[i]) for i in range(x.ndim))
+    windows = windows[slicer]
+
+    window_axes = tuple(range(x.ndim, 2 * x.ndim))
+    return windows.sum(axis=window_axes)
+
 
 eval_rules = {
     core.expand_dims: lambda x, axes: np.expand_dims(x, axes),
@@ -137,4 +149,5 @@ eval_rules = {
     core.pad: lambda x, config, axes, value: np_pad(x, config, axes, value),
     core.conv: lambda x, k, stride: np_conv(x, k, stride),
     core.avgpool: lambda x, window_size, stride: np_avgpool(x, window_size, stride),
+    core.sumpool: lambda x, window_size, stride: np_sumpool(x, window_size, stride),
 }

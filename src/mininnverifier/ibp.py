@@ -144,7 +144,7 @@ def ibp_reciprocal(x):
     lb, ub = x.lb.array, x.ub.array
     straddles = (lb <= 0.0) & (ub >= 0.0)
     with np.errstate(divide="ignore"):
-        r_lb, r_ub = 1.0 / ub, 1.0 / lb        # reciprocal ist monoton fallend, wenn kein Straddle
+        r_lb, r_ub = 1.0 / ub, 1.0 / lb # reciprocal ist monoton fallend, wenn kein Straddle
     out_lb = np.where(straddles, -np.inf, np.minimum(r_lb, r_ub))
     out_ub = np.where(straddles,  np.inf, np.maximum(r_lb, r_ub))
     return Array(out_lb), Array(out_ub)
@@ -171,6 +171,7 @@ mono_non_dec_primitives = {
     core.elu, 
     core.normalcdf, 
     core.avgpool, 
+    core.sumpool,
     core.pad,
 }
 mono_non_inc_primitives = {core.neg}
