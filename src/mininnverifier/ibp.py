@@ -108,8 +108,8 @@ def ibp_where(cond, x, y):
     xl, xu = x.lb.array, x.ub.array
     yl, yu = y.lb.array, y.ub.array
 
-    sure_true  = cl > 0.0
-    sure_false = cu <= 0.0
+    sure_true  = (cl > 0.0) | (cu < 0.0)
+    sure_false = (cl == 0.0) & (cu == 0.0)
 
     out_lb = np.where(sure_true, xl, np.where(sure_false, yl, np.minimum(xl, yl)))
     out_ub = np.where(sure_true, xu, np.where(sure_false, yu, np.maximum(xu, yu)))
