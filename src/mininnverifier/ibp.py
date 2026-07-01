@@ -83,6 +83,8 @@ def ibp_linear(fn, x, y, **options):
     if not x.is_point and not y.is_point:
         if fn is core.mul:
             return ibp_mul_box_box(x, y)
+        if fn is core.dot:
+            return ibp_dot_box_box(x, y)
         raise NotImplementedError(f"No IBP rule for bilinear application of primitive {fn}")
     elif x.is_point:
         x = x.lb
@@ -151,10 +153,26 @@ def ibp_reciprocal(x):
     lb, ub = x.lb.array, x.ub.array
     straddles = (lb <= 0.0) & (ub >= 0.0)
     with np.errstate(divide="ignore"):
-        r_lb, r_ub = 1.0 / ub, 1.0 / lb # reciprocal ist monoton fallend, wenn kein Straddle
+        r_lb, r_ub = 1.0 / ub, 1.0 / lb 
     out_lb = np.where(straddles, -np.inf, np.minimum(r_lb, r_ub))
     out_ub = np.where(straddles,  np.inf, np.maximum(r_lb, r_ub))
     return Array(out_lb), Array(out_ub)
+
+# used in the transformer
+def ibp_dot_box_box(x, y):
+    xl, xu = x.lb.array, x.ub.array
+    yl, yu = y.lb.array, y.ub.array
+    if yl.ndim <= 1:
+        c = [xl * yl, xl * yu, xu * yl, xu * yu]
+        lo = np.minimum.reduce(c)
+        hi = np.maximum.reduce(c)
+        return Array(lo.sum(-1)), Array(hi.sum(-1))
+    else:
+        xl_e, xu_e = xl[..., :, None], xu[..., :, None]
+        c = [xl_e * yl, xl_e * yu, xu_e * yl, xu_e * yu]
+        lo = np.minimum.reduce(c)
+        hi = np.maximum.reduce(c)
+        return Array(lo.sum(-2)), Array(hi.sum(-2))
 
 custom_primitives = {
     core.square: ibp_square,
@@ -181,5 +199,6 @@ mono_non_dec_primitives = {
     core.sumpool,
     core.pad,
 }
+
 mono_non_inc_primitives = {core.neg}
 linear_primitives = {core.dot, core.mul}
