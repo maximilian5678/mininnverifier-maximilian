@@ -6,7 +6,7 @@ import numpy as np
 import scipy.special as special
 
 from minijax import core
-from minijax.core import Value, abs
+from minijax.core import abs
 from minijax.nested_containers import flatten, map_structure
 from minijax.eval import Array
 

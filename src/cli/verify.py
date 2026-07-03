@@ -19,7 +19,8 @@ from minijax.serialize import load
 from minijax.eval import Array
 from minijax.jit import run_graph
 from mininnverifier.ibp import Box
-from mininnverifier.input_splitting_bab import input_splitting_bab
+#from mininnverifier.input_splitting_bab import input_splitting_bab
+from mininnverifier.input_splitting_batched_bab import input_splitting_bab
 
 def _load_array(path, shape):
     return Array(np.fromfile(path, dtype=np.float64).reshape(shape))

@@ -43,7 +43,6 @@ def _load_array(path, shape):
 
 
 def _parse_inputs(tokens, invars):
-    """Walk ``tokens`` consuming one input spec per network input."""
     inputs = []
     i = 0
     for var in invars:
