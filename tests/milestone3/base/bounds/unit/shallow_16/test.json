@@ -1,0 +1,34 @@
+{
+    "command": "affine_bounds",
+    "network": "resources/shallow_16_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "check": "affine_bounds_within_range",
+    "input_shape": [
+        100,
+        4
+    ],
+    "output_shapes": [
+        []
+    ],
+    "sample_inputs": [
+        "resources/sample_inputs_0.bin"
+    ],
+    "sample_outputs": [
+        "resources/sample_outputs_0.bin"
+    ],
+    "reference_lb": [
+        "resources/reference_output_0_lb.bin"
+    ],
+    "reference_ub": [
+        "resources/reference_output_0_ub.bin"
+    ],
+    "tightness_factor": 1.5,
+    "sample_atol": 1e-09,
+    "description": "CROWN affine output bounds for the scalarised milestone1 'shallow_16' network over an L-inf box (eps=0.05) [reference: auto_LiRPA CROWN-IBP (IBP intermediate bounds + CROWN output pass, matching crown.py; intersected with auto_LiRPA IBP)]",
+    "points": 0,
+    "bonus_points": 0
+}

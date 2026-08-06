@@ -1,0 +1,13 @@
+{
+    "command": "verify2",
+    "network": "resources/cifar_conv_leaky_relu_sat_2_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "sat",
+    "timeout": 600,
+    "description": "conv cifar classifier (leaky_relu): targeted L-inf robustness (class 5 vs 3) at image 16, eps=2/255.",
+    "points": 12
+}

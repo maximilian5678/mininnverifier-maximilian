@@ -21,7 +21,7 @@ def mlp(x, params: list[dict[str, Array]]):
 
 
 def softmax(x, axis: int):
-    x_mean = reduce_sum(x, axis, keepaxes=True) / Array(x.shape[axis])
+    x_mean = reduce_sum(x, axis, keepaxes=True) / x.shape[axis]
     exp_x = exp(x - x_mean)  # more numerically stable softmax
     return exp_x / reduce_sum(exp_x, axis, keepaxes=True)
 
@@ -30,7 +30,7 @@ def softmax(x, axis: int):
 
 
 def reduce_mean(x):
-    return reduce_sum(x) / Array(math.prod(x.shape))
+    return reduce_sum(x) / math.prod(x.shape)
 
 
 def cross_entropy(y_pred, y_true):

@@ -5,15 +5,15 @@ from dataclasses import dataclass
 from functools import partial
 
 from .core import Interpreter, Primitive, Value, new_interpreter
+from .eval import Array
 from .nested_containers import flatten, map_structure
 
 
 def make_graph(fn, return_out_structure=False):
     def make_graph_fn(*args, **kwargs):
-        make_cg = new_interpreter(MakeCG, flatten(args)[0])
-        in_tracers = map_structure(partial(Tracer, make_cg), args)
-
-        out_tracers = fn(*in_tracers, **kwargs)
+        with new_interpreter(MakeCG()) as make_cg:
+            in_tracers = map_structure(partial(Tracer, make_cg), args)
+            out_tracers = fn(*in_tracers, **kwargs)
 
         out_tracers, out_structure = flatten(out_tracers)
         graph = make_cg.graph(flatten(in_tracers)[0], out_tracers)
@@ -79,17 +79,26 @@ class ComputeGraph:
         repr += "\n".join([f"  {eqn}" for eqn in self.equations]) + "\n"
         return repr + "output: " + " ".join(map(str, self.outvars))
 
+    def __call__(self, *args):
+        values = {iv: v for iv, v in zip(self.invars, args, strict=True)}
+        for eqn in self.equations:
+            args = [v.value if v.is_const else values[v] for v in eqn.inputs]
+            out = eqn.primitive(*args, **eqn.options)
+            values[eqn.outvar] = out
+        return values
+
 
 class Tracer(Value):
     def __init__(self, interpreter, value, const=False):
+        if not isinstance(value, Value):
+            value = Array(value)
         super().__init__(interpreter, value.shape)
         self.value = value
         self.var = Const(value) if const else Var(value.shape)
 
 
 class MakeCG(Interpreter[Tracer]):
-    def __init__(self, level: int):
-        super().__init__(level)
+    def __init__(self):
         self.equations = []
 
     def wrap(self, value):

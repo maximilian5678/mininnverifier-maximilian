@@ -1,0 +1,35 @@
+{
+    "command": "affine_bounds",
+    "network": "resources/avgpool_window1_identity_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "check": "affine_bounds_within_range",
+    "input_shape": [
+        1,
+        1,
+        2,
+        3
+    ],
+    "output_shapes": [
+        []
+    ],
+    "sample_inputs": [
+        "resources/sample_inputs_0.bin"
+    ],
+    "sample_outputs": [
+        "resources/sample_outputs_0.bin"
+    ],
+    "reference_lb": [
+        "resources/reference_output_0_lb.bin"
+    ],
+    "reference_ub": [
+        "resources/reference_output_0_ub.bin"
+    ],
+    "tightness_factor": 1.5,
+    "sample_atol": 1e-09,
+    "description": "CROWN affine bounds for reduce_sum of the avgpool network 'avgpool_window1_identity' over an L-inf box (ported from the milestone2 IBP suite).",
+    "points": 1
+}

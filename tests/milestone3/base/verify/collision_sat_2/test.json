@@ -1,0 +1,14 @@
+{
+    "command": "verify2",
+    "network": "resources/collision_sat_2_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "sat",
+    "timeout": 600,
+    "description": "collision-avoidance ReLU net: 'safe' margin >= 0 verified on a state box",
+    "points": 0,
+    "bonus_points": 0
+}

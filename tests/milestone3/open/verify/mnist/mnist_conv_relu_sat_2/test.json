@@ -1,0 +1,13 @@
+{
+    "command": "verify2",
+    "network": "resources/mnist_conv_relu_sat_2_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "sat",
+    "timeout": 600,
+    "description": "conv mnist classifier (relu): targeted L-inf robustness (class 1 vs 8) at image 29, eps=10/255.",
+    "points": 25
+}

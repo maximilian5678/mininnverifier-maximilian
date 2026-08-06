@@ -1,0 +1,32 @@
+{
+    "command": "affine_bounds",
+    "network": "resources/leaky_relu_unit_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "check": "affine_bounds_within_range",
+    "input_shape": [
+        8
+    ],
+    "output_shapes": [
+        []
+    ],
+    "sample_inputs": [
+        "resources/sample_inputs_0.bin"
+    ],
+    "sample_outputs": [
+        "resources/sample_outputs_0.bin"
+    ],
+    "reference_lb": [
+        "resources/reference_output_0_lb.bin"
+    ],
+    "reference_ub": [
+        "resources/reference_output_0_ub.bin"
+    ],
+    "tightness_factor": 1.5,
+    "sample_atol": 1e-09,
+    "description": "CROWN affine bounds for reduce_sum(LeakyReLU(x, 0.1)) over a straddling L-inf box (the kink at x=0 is the relaxation gap).",
+    "points": 7
+}

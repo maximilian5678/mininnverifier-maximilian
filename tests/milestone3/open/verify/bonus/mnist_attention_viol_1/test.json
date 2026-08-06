@@ -1,0 +1,14 @@
+{
+    "command": "verify2",
+    "network": "resources/mnist_attention_viol_1_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "viol",
+    "timeout": 600,
+    "description": "single-head attention MNIST: robustness violated at image 0, eps=0.01.",
+    "points": 0,
+    "bonus_points": 80
+}

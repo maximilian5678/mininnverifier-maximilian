@@ -2,7 +2,7 @@
 # Licensed under the MIT Licensed.
 from . import core
 from .compute_graph import make_graph
-from .eval import Array, zeros
+from .eval import Array, zeros, ones, broadcast_to
 from .nested_containers import flatten, unflatten
 import scipy.special as special
 import numpy as np
@@ -27,8 +27,8 @@ def vjp(fn, return_primals=False):
         in_primals, in_structure = flatten(in_primals)
         out_tangents, out_structure = flatten(out_tangents)
 
-        primals = _forward(cg, in_primals)
-        in_tangents = _backwards(cg, primals, out_tangents)
+        primals = cg(*in_primals)
+        in_tangents = _grad_backwards(cg, primals, out_tangents)
 
         in_tangents = unflatten(in_structure, in_tangents)
         if return_primals:
@@ -40,23 +40,12 @@ def vjp(fn, return_primals=False):
     return vjp_fn
 
 
-def _forward(cg, primals):
-    primals = {iv: p for iv, p in zip(cg.invars, primals, strict=True)}
-    for eqn in cg.equations:
-        args = [v.value if v.is_const else primals[v] for v in eqn.inputs]
-        out = eqn.primitive(*args, **eqn.options)
-        primals[eqn.outvar] = out
-    return primals
-
-
-def _backwards(cg, primals, out_tangents):
+def _grad_backwards(cg, primals, out_tangents):
     tangents = {ov: t for ov, t in zip(cg.outvars, out_tangents)}
 
     def update(var, tangent):
-        if var in tangents:
-            tangents[var] = core.add(tangents[var], unbroadcast(tangent, primals[var]))
-        elif not var.is_const:
-            tangents[var] = unbroadcast(tangent, primals[var])
+        if not var.is_const:
+            tangents[var] = tangents.get(var, Array(0.0)) + unbroadcast(tangent, var.shape)
 
     for eqn in reversed(cg.equations):
         in_primals = [a.value if a.is_const else primals[a] for a in eqn.inputs]
@@ -72,27 +61,26 @@ def _backwards(cg, primals, out_tangents):
     return [tangents.get(iv, zeros(iv.shape)) for iv in cg.invars]
 
 
-def unbroadcast(tangent, primal):
-    added = [i for i in range(len(tangent.shape) - len(primal.shape))]
+def unbroadcast(tangent, primal_shape):
+    added = [i for i in range(len(tangent.shape) - len(primal_shape))]
     tangent = core.reduce_sum(tangent, tuple(added))
     # tangent and primal now have the same number of axes
-    expanded = [i for i, (t, p) in enumerate(zip(tangent.shape, primal.shape)) if t != p]
+    expanded = [i for i, (t, p) in enumerate(zip(tangent.shape, primal_shape)) if t != p]
     return core.reduce_sum(tangent, tuple(expanded), keepaxes=True)
 
 
-def broadcast_to(tangent, primal):
-    # exploiting that add does broadcasting
-    return core.add(tangent, zeros(primal.shape))
-
-
 def vjp_dot(t, _, x, y):
-    if y.ndim == 1:
-        dx = core.expand_dims(t, axes=-1) @ core.expand_dims(y, axes=0)
+    if y.ndim == 0:
+        dx = t * y
+    elif y.ndim == 1:
+        dx = core.expand_dims(t, axes=(-1,)) @ core.expand_dims(y, axes=(0,))
     else:
         dx = t @ core.transpose(y)
 
-    if x.ndim == 1:
-        dy = core.expand_dims(x, axes=-1) @ core.expand_dims(t, axes=0)
+    if x.ndim == 0:
+        dy = x * t
+    elif x.ndim == 1:
+        dy = core.expand_dims(x, axes=(-1,)) @ core.expand_dims(t, axes=(0,))
     else:
         dy = core.transpose(x) @ t
     return dx, dy
@@ -194,23 +182,32 @@ def vjp_avgpool(t, _, x, window_size, stride):
     return Array(dx)
 
 
+def vjp_concat_two(t, _, x, __, axis):
+    return (core.head(t, axis, x.shape[axis]), core.tail(t, axis, x.shape[axis]))
+
+
+def vjp_head(t, _, x, axis, index):
+    tail_shape = list(x.shape)
+    tail_shape[axis] = x.shape[axis] - index
+    return core.concat_two(t, zeros(tail_shape), axis=axis)
+
+
+def vjp_tail(t, _, x, axis, index):
+    head_shape = list(x.shape)
+    head_shape[axis] = index
+    return core.concat_two(zeros(head_shape), t, axis=axis)
+
+
 vjp_rules = {
-    core.expand_dims: lambda t, _, x, axes: core.reduce_sum(t, axes),
+    core.expand_dims: lambda t, _, __, axes: core.reduce_sum(t, axes),
     core.moveaxis: lambda t, _, __, source, destination: core.moveaxis(t, destination, source),
     core.reshape: lambda t, _, x, new_shape: core.reshape(t, x.shape),
     core.neg: lambda t, *_: -t,
     core.add: lambda t, *_: (t, t),
-    core.reduce_sum: lambda t, _, x, axes: broadcast_to(core.expand_dims(t, axes), x),
+    core.reduce_sum: lambda t, _, x, axes: broadcast_to(core.expand_dims(t, axes), x.shape),
     core.dot: vjp_dot,
     core.mul: lambda t, _, x, y: (t * y, x * t),
     core.reciprocal: lambda t, _, x: -core.reciprocal(core.square(x)) * t,
-    core.relu: lambda t, out, x: core.where(out, t, Array(0)),
-    core.square: lambda t, _, x: t * Array(2) * x,
-    core.sqrt: lambda t, _, x: t / (Array(2) * core.sqrt(x)),
-    core.exp: lambda t, out, x: t * out,
-    core.log: lambda t, _, x: t / x,
-    core.where: vjp_where,
-    # Activation Functions
     core.leaky_relu: lambda t, out, x, slope: core.where(core.ge(x, Array(0)), t, Array(slope) * t),
     core.elu: lambda t, out, x: core.where(core.ge(x, Array(0)), t, (out + Array(1)) * t),
     core.gelu: lambda t, _, x: t * Array(
@@ -221,4 +218,17 @@ vjp_rules = {
     core.pad: lambda t, _, x, config, axes, value: np_unpad(t, config, axes, x.shape),
     core.conv: vjp_conv,
     core.avgpool: vjp_avgpool,
+    core.relu: lambda t, _, x: core.where(x > 0, t, 0),
+    core.square: lambda t, _, x: t * 2 * x,
+    core.sqrt: lambda t, _, x: t / (2 * core.sqrt(x)),
+    core.exp: lambda t, out, _: t * out,
+    core.log: lambda t, _, x: t / x,
+    core.where: vjp_where,
+    core.greater_equal: lambda t, *_: (zeros(t.shape), zeros(t.shape)),
+    core.less_equal: lambda t, *_: (zeros(t.shape), zeros(t.shape)),
+    core.elementwise_not: lambda t, *_: zeros(t.shape),
+    core.elementwise_and: lambda t, *_: (zeros(t.shape), zeros(t.shape)),
+    core.concat_two: vjp_concat_two,
+    core.head: vjp_head,
+    core.tail: vjp_tail,
 }

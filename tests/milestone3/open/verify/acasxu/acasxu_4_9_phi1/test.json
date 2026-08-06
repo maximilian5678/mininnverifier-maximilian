@@ -1,0 +1,14 @@
+{
+    "command": "verify2",
+    "network": "resources/acasxu_4_9_phi1_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "sat",
+    "timeout": 600,
+    "description": "ACAS Xu N_4_9, Reluplex property phi1 (COC score <= 1500) over the phi1 input region (rho>=55947.691, v_own>=1145, v_int<=60).",
+    "points": 0,
+    "bonus_points": 40
+}

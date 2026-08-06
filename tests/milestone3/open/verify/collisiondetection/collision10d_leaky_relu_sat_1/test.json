@@ -1,0 +1,13 @@
+{
+    "command": "verify2",
+    "network": "resources/collision10d_leaky_relu_sat_1_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "sat",
+    "timeout": 600,
+    "description": "leaky_relu collision10d margin: node-splitting robustness (sat).",
+    "points": 15
+}

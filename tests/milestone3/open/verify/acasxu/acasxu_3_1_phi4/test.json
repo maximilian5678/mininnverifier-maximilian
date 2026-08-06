@@ -1,0 +1,13 @@
+{
+    "command": "verify2",
+    "network": "resources/acasxu_3_1_phi4_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "sat",
+    "timeout": 600,
+    "description": "ACAS Xu acasxu_3_1, Reluplex property phi4 (COC is never the minimal (advised) score) over its normalized input region: sat -- verified by CROWN + input-splitting. Deep 6x50 ReLU net;.",
+    "points": 18
+}

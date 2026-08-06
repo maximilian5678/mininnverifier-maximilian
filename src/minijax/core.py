@@ -2,6 +2,7 @@
 # Licensed under the MIT Licensed.
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 
@@ -33,11 +34,53 @@ class Value(ABC):
     def __matmul__(self, other):
         return dot(self, other)
 
+    def __radd__(self, other):
+        return add(other, self)
+
+    def __rsub__(self, other):
+        return sub(other, self)
+
+    def __rmul__(self, other):
+        return mul(other, self)
+
+    def __rtruediv__(self, other):
+        return div(other, self)
+
+    def __rmatmul__(self, other):
+        return dot(other, self)
+
+    def __ge__(self, other):
+        return greater_equal(self, other)
+
+    def __le__(self, other):
+        return less_equal(self, other)
+
+    def __gt__(self, other):
+        return greater_than(self, other)
+
+    def __lt__(self, other):
+        return less_than(self, other)
+
+    def __eq__(self, other):
+        return equals(self, other)
+
+    def __ne__(self, other):
+        return elementwise_not(equals(self, other))
+
+    def __invert__(self):
+        return elementwise_not(self)
+
+    def __and__(self, other):
+        return elementwise_and(self, other)
+
+    def __or__(self, other):
+        return elementwise_or(self, other)
+
+    def __getitem__(self, i):
+        return getitem(self, i)
+
 
 class Interpreter[V: Value](ABC):
-    def __init__(self, level: int):
-        self.level = level
-
     @abstractmethod
     def wrap(self, value: Value) -> V:
         raise NotImplementedError()
@@ -47,13 +90,26 @@ class Interpreter[V: Value](ABC):
         raise NotImplementedError()
 
 
-def new_interpreter[I: Interpreter](interpreter_cls: type[I], in_values: Iterable[Value]) -> I:
-    top_level = max([val.interpreter.level for val in in_values])
-    return interpreter_cls(top_level + 1)
+_interpreter_stack: list[Interpreter] = []
+
+
+@contextmanager
+def new_interpreter(interpreter: Interpreter):
+    _interpreter_stack.append(interpreter)
+    try:
+        yield interpreter
+    finally:
+        _interpreter_stack.pop()
 
 
 def top_interpreter(values: Iterable[Value]):
-    return max([val.interpreter for val in values], key=lambda i: i.level)
+    owners = {val.interpreter for val in values if isinstance(val, Value)}
+    for interpreter in reversed(_interpreter_stack):
+        if interpreter in owners:
+            return interpreter
+    from .eval import EvalInterpreter  # cannot import at top level (circular import)
+
+    return EvalInterpreter()
 
 
 @dataclass(frozen=True)
@@ -111,6 +167,14 @@ pad = Primitive("pad", 1, ("config", "axes", "value",))
 conv = Primitive("conv", 2, ("stride",))
 avgpool = Primitive("avgpool", 1, ("window_size", "stride"))
 sumpool = Primitive("sumpool", 1, ("window_size", "stride"))
+greater_equal = Primitive("greater_equal", 2)
+less_equal = Primitive("less_equal", 2)
+elementwise_not = Primitive("not", 1)
+elementwise_and = Primitive("and", 2)
+
+concat_two = Primitive("concat_two", 2, ("axis",))
+head = Primitive("head", 1, ("axis", "index"))
+tail = Primitive("tail", 1, ("axis", "index"))
 
 
 def sub(x, y):
@@ -121,8 +185,66 @@ def div(x, y):
     return mul(x, reciprocal(y))
 
 
+def abs(x):
+    return add(relu(x), relu(neg(x)))
+
+
+def maximum(x, y):
+    return add(y, relu(x - y))
+
+
+def minimum(x, y):
+    return sub(y, relu(y - x))
+
+
+def clip(x, lower, upper):
+    return minimum(maximum(x, lower), upper)
+
+
 def transpose(x):
     return moveaxis(x, -1, -2)
 
-def abs(x):
-    return add(relu(x), relu(neg(x)))
+
+def less_than(x, y):
+    return elementwise_not(greater_equal(x, y))
+
+
+def greater_than(x, y):
+    return elementwise_not(less_equal(x, y))
+
+
+def elementwise_or(x, y):
+    return elementwise_not(elementwise_and(elementwise_not(x), elementwise_not(y)))
+
+
+def equals(x, y):
+    return elementwise_and(greater_equal(x, y), less_equal(x, y))
+
+
+def concat(arg0, *args, axis: int = 0):
+    if len(args) == 0:
+        return arg0
+
+    res = arg0
+    for arg in args:
+        res = concat_two(res, arg, axis=axis)
+    return res
+
+
+def split(x, indices, axis: int = 0):
+    pieces = []
+    rest, start = x, 0
+    for index in indices:
+        pieces.append(head(rest, axis=axis, index=index - start))
+        rest = tail(rest, axis=axis, index=index - start)
+        start = index
+    pieces.append(rest)
+    return tuple(pieces)
+
+
+def getitem(x, i, axis: int = 0):
+    if i < 0:
+        i += x.shape[axis]
+    elem = head(tail(x, axis=axis, index=i), axis=axis, index=1)
+    new_shape = x.shape[:axis] + x.shape[axis + 1 :]
+    return reshape(elem, new_shape=new_shape)

@@ -1,0 +1,13 @@
+{
+    "command": "verify2",
+    "network": "resources/mnist_gelu_sat_3_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "sat",
+    "timeout": 600,
+    "description": "gelu MNIST classifier: targeted L-inf robustness (vs class 3) verified at image 5, eps=0.03.",
+    "points": 11
+}

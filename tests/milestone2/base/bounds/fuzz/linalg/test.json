@@ -4,8 +4,7 @@
   "seed": 10417485,
   "primitives": [
     "dot",
-    "add",
-    "mul"
+    "add"
   ],
   "check_nan_inf": false,
   "eps_min": 0.0,

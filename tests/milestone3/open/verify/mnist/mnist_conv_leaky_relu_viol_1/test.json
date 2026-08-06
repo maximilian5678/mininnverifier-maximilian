@@ -1,0 +1,13 @@
+{
+    "command": "verify2",
+    "network": "resources/mnist_conv_leaky_relu_viol_1_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "viol",
+    "timeout": 600,
+    "description": "conv mnist classifier (leaky_relu): targeted L-inf robustness (class 7 vs 9) at image 0, eps=32/255.",
+    "points": 12
+}

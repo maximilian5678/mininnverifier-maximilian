@@ -61,21 +61,21 @@ def load_hyperparams(dataset_id):
 
 def adam(params, grads, opt_state, lr=1e-3, beta1=0.9, beta2=0.999, eps=1e-8):
     def m_update(g, m_prev):
-        return add(mul(Array(beta1), m_prev), mul(Array(1 - beta1), g))
+        return add(mul(beta1, m_prev), mul(1 - beta1, g))
 
     def v_update(g, v_prev):
-        return add(mul(Array(beta2), v_prev), mul(Array(1 - beta2), square(g)))
+        return add(mul(beta2, v_prev), mul(1 - beta2, square(g)))
 
     m_prevs, v_prevs, beta1powtm1, beta2powtm2 = opt_state
     m_new = map_structure(m_update, grads, m_prevs)
     v_new = map_structure(v_update, grads, v_prevs)
-    beta1powt = mul(beta1powtm1, Array(beta1))
-    beta2powt = mul(beta2powtm2, Array(beta2))
+    beta1powt = mul(beta1powtm1, beta1)
+    beta2powt = mul(beta2powtm2, beta2)
 
     def param_update(p, m, v):
-        m_hat = div(m, sub(Array(1), beta1powt))
-        v_hat = div(v, sub(Array(1), beta2powt))
-        return sub(p, mul(Array(lr), div(m_hat, add(sqrt(v_hat), Array(eps)))))
+        m_hat = div(m, sub(1, beta1powt))
+        v_hat = div(v, sub(1, beta2powt))
+        return sub(p, mul(lr, div(m_hat, add(sqrt(v_hat), eps))))
 
     new_params = map_structure(param_update, params, m_new, v_new)
     return new_params, (m_new, v_new, beta1powt, beta2powt)

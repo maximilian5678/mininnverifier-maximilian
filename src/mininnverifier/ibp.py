@@ -6,9 +6,9 @@ import numpy as np
 import scipy.special as special
 
 from minijax import core
-from minijax.core import abs
-from minijax.nested_containers import flatten, map_structure
-from minijax.eval import Array
+from minijax.core import Value, abs, where, relu
+from minijax.nested_containers import map_structure
+from minijax.eval import Array, zeros
 
 
 @dataclass
@@ -23,12 +23,10 @@ def box_or_val(obj):
 
 def ibp(fn):
     def ibp_fn(*args: Box | core.Value, **kwargs):
-        flat_args = flatten(args, is_leaf=box_or_val)[0]
-        level_values = [a.lb if isinstance(a, Box) else a for a in flat_args]
-        interpreter = core.new_interpreter(IBPInterpreter, level_values)
-        vals = map_structure(interpreter.wrap, args, is_leaf=box_or_val)
+        with core.new_interpreter(IBPInterpreter()) as interpreter:
+            vals = map_structure(interpreter.wrap, args, is_leaf=box_or_val)
+            out_bounds = fn(*vals, **kwargs)
 
-        out_bounds = fn(*vals, **kwargs)
         return map_structure(lambda ibp_val: Box(ibp_val.lb, ibp_val.ub), out_bounds)
 
     return ibp_fn
@@ -47,6 +45,8 @@ class IBPInterpreter(core.Interpreter[IBPValue]):
             return value
         elif isinstance(value, Box):
             return IBPValue(self, value.lb, value.ub)
+        if not isinstance(value, core.Value):
+            value = Array(value)
         return IBPValue(self, value, value, is_point=True)
 
     def process(self, primitive, values, options):
@@ -62,6 +62,8 @@ class IBPInterpreter(core.Interpreter[IBPValue]):
             out_lb, out_ub = ibp_monotonic_non_increasing(primitive, *values, **options)
         elif primitive in linear_primitives:
             out_lb, out_ub = ibp_linear(primitive, *values, **options)
+        elif primitive is core.square:
+            out_lb, out_ub = ibp_square(*values, **options)
         else:
             raise NotImplementedError(f"No IBP rule for primitive {primitive}")
         return IBPValue(self, out_lb, out_ub)
@@ -88,8 +90,8 @@ def ibp_linear(fn, x, y, **options):
         raise NotImplementedError(f"No IBP rule for bilinear application of primitive {fn}")
     elif x.is_point:
         x = x.lb
-        y_mid = (y.ub + y.lb) * Array(0.5)
-        y_ran = (y.ub - y.lb) * Array(0.5)
+        y_mid = (y.ub + y.lb) * 0.5
+        y_ran = (y.ub - y.lb) * 0.5
         out_mid = fn(x, y_mid, **options)
         out_ran = fn(abs(x), y_ran, **options)
         return out_mid - out_ran, out_mid + out_ran
@@ -182,10 +184,24 @@ custom_primitives = {
     core.reciprocal: ibp_reciprocal,
 }
 
+def ibp_square(x):
+    y_l, y_r = core.square(x.lb), core.square(x.ub)
+    # x.lb >= 0 => monotonic increasing
+    # x.ub <= 0 => monotonic decreasing
+    # x.lb < 0 < x.ub => lb = 0.0, ub = max(x.lb^2 , x.ub^2)
+    y_lb = where(x.lb >= 0.0, y_l, where(x.ub < 0.0, y_r, zeros(x.shape)))
+    # x.ub > -x.lb => x.ub + x.lb > 0
+    y_ub = where(x.lb >= 0.0, y_r, where(x.ub < 0.0, y_l, where(-x.lb >= x.ub, y_l, y_r)))
+    return y_lb, y_ub
+
+
 mono_non_dec_primitives = {
     core.expand_dims,
     core.moveaxis,
     core.reshape,
+    core.concat,
+    core.head,
+    core.tail,
     core.add,
     core.reduce_sum,
     core.relu,

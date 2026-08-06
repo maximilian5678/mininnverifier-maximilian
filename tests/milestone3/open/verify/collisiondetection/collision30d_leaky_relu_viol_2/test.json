@@ -1,0 +1,13 @@
+{
+    "command": "verify2",
+    "network": "resources/collision30d_leaky_relu_viol_2_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "viol",
+    "timeout": 600,
+    "description": "30-D collision-avoidance classifier (leaky_relu): counterexample found on an L-inf box (eps=0.180).",
+    "points": 11
+}

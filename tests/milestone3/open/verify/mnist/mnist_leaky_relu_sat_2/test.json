@@ -1,0 +1,13 @@
+{
+    "command": "verify2",
+    "network": "resources/mnist_leaky_relu_sat_2_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "sat",
+    "timeout": 600,
+    "description": "leaky_relu MNIST classifier: targeted L-inf robustness (vs class 3) verified at image 1, eps=0.01.",
+    "points": 11
+}

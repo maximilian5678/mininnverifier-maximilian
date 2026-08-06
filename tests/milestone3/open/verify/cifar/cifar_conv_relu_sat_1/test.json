@@ -1,0 +1,13 @@
+{
+    "command": "verify2",
+    "network": "resources/cifar_conv_relu_sat_1_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "sat",
+    "timeout": 600,
+    "description": "conv cifar classifier (relu): targeted L-inf robustness (class 0 vs 8) at image 44, eps=6/255.",
+    "points": 25
+}

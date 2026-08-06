@@ -1,0 +1,14 @@
+{
+    "command": "verify2",
+    "network": "resources/pendulum6d_leaky_relu_sat_2_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "sat",
+    "timeout": 600,
+    "description": "leaky_relu pendulum6d margin: node-splitting robustness (sat).",
+    "points": 0,
+    "bonus_points": 40
+}

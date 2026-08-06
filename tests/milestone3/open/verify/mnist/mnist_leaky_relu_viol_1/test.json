@@ -1,0 +1,13 @@
+{
+    "command": "verify2",
+    "network": "resources/mnist_leaky_relu_viol_1_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "viol",
+    "timeout": 600,
+    "description": "leaky_relu MNIST classifier: robustness violated at image 0, eps=0.06 (a counterexample exists).",
+    "points": 13
+}

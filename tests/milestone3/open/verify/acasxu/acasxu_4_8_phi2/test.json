@@ -1,0 +1,13 @@
+{
+    "command": "verify2",
+    "network": "resources/acasxu_4_8_phi2_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "viol",
+    "timeout": 600,
+    "description": "ACAS Xu acasxu_4_8, Reluplex property phi2 (COC is never the maximal score) over its normalized input region: viol -- counterexample found (PGD witness). Deep 6x50 ReLU net;.",
+    "points": 10
+}

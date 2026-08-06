@@ -1,0 +1,28 @@
+{
+    "command": "fuzz_affine_bounds",
+    "n_trials": 20,
+    "seed": 1677293,
+    "primitives": [
+        "neg",
+        "relu",
+        "leaky_relu",
+        "add",
+        "mul",
+        "dot",
+        "expand_dims",
+        "moveaxis",
+        "reshape",
+        "reduce_sum",
+        "pad",
+        "conv",
+        "avgpool"
+    ],
+    "check_nan_inf": true,
+    "eps_min": 0.001,
+    "eps_max": 0.5,
+    "n_eval_samples": 3,
+    "sample_atol": 1e-06,
+    "sample_rtol": 1e-06,
+    "description": "CROWN affine_bounds numerics fuzz: numerically safe primitives only, fails on NaN/Inf in the affine bounds.",
+    "points": 12
+}

@@ -8,7 +8,7 @@ from . import core
 
 class Array(core.Value):
     def __init__(self, array_like):
-        self.array = np.asarray(array_like, dtype=np.float64)
+        self.array = np.asarray(array_like)
         super().__init__(EvalInterpreter(), self.array.shape)
 
     def item(self):
@@ -31,10 +31,12 @@ def ones(shape):
     return full(shape, 1.0)
 
 
-class EvalInterpreter(core.Interpreter[Array]):
-    def __init__(self):
-        super().__init__(0)
+def broadcast_to(value, shape):
+    # exploiting that add does broadcasting
+    return core.add(value, zeros(shape))
 
+
+class EvalInterpreter(core.Interpreter[Array]):
     def wrap(self, value):
         if not isinstance(value, core.Value):
             return Array(value)
@@ -49,9 +51,11 @@ class EvalInterpreter(core.Interpreter[Array]):
 
 
 def np_dot(x, y):  # np.dot doesn't broadcast
-    if y.ndim <= 1:
+    if x.ndim == 0 or y.ndim == 0:
+        return x * y
+    elif y.ndim <= 1 or x.ndim <= 1:
         return np.dot(x, y)
-    return np.einsum("...j,...jk", x, y)
+    return np.einsum("...ij,...jk->...ik", x, y)
 
 def np_pad(x, config, axes, value):
     if len(axes) == 0:
@@ -130,7 +134,7 @@ eval_rules = {
     core.reshape: lambda x, new_shape: np.reshape(x, new_shape),
     core.neg: lambda x: -x,
     core.add: lambda x, y: x + y,
-    core.reduce_sum: lambda x, axes: x.sum(axes),
+    core.reduce_sum: lambda x, axes: x.sum(tuple(axes)),
     core.dot: np_dot,
     core.mul: lambda x, y: x * y,
     core.reciprocal: lambda x: 1 / x,
@@ -140,7 +144,6 @@ eval_rules = {
     core.exp: np.exp,
     core.log: np.log,
     core.where: np.where,
-    # Activation Functions
     core.leaky_relu: lambda x, slope: np.where(x >= 0, x, slope * x),
     core.elu: lambda x: np.where(x >= 0, x, np.exp(x) - 1),
     core.gelu: lambda x: x * 0.5 * (1 + special.erf(x / np.sqrt(2))),
@@ -150,4 +153,11 @@ eval_rules = {
     core.conv: lambda x, k, stride: np_conv(x, k, stride),
     core.avgpool: lambda x, window_size, stride: np_avgpool(x, window_size, stride),
     core.sumpool: lambda x, window_size, stride: np_sumpool(x, window_size, stride),
+    core.greater_equal: np.greater_equal,
+    core.less_equal: np.less_equal,
+    core.elementwise_not: np.bitwise_not,
+    core.elementwise_and: np.bitwise_and,
+    core.concat_two: lambda x, y, axis: np.concatenate([x, y], axis),
+    core.head: lambda x, axis, index: np.split(x, [index], axis)[0],
+    core.tail: lambda x, axis, index: np.split(x, [index], axis)[1],
 }

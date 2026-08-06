@@ -1,0 +1,14 @@
+{
+    "command": "verify2",
+    "network": "resources/dubinsrejoin_3_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "sat",
+    "timeout": 600,
+    "description": "VNN-COMP dubinsrejoin controller (dubinsrejoin_case_unsafe_11): property verified safe over the input box (auto_LiRPA CROWN).",
+    "points": 0,
+    "bonus_points": 12
+}

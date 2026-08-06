@@ -1,0 +1,14 @@
+{
+    "command": "verify2",
+    "network": "resources/circles_sat_2_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "sat",
+    "timeout": 600,
+    "description": "circles margin >= 0 on a box in the positive region",
+    "points": 0,
+    "bonus_points": 0
+}

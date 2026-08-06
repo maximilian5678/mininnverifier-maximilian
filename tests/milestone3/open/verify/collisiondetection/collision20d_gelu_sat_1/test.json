@@ -1,0 +1,13 @@
+{
+    "command": "verify2",
+    "network": "resources/collision20d_gelu_sat_1_network.mininn",
+    "inputs": [
+        "box",
+        "resources/input_0_lb.bin",
+        "resources/input_0_ub.bin"
+    ],
+    "expected_verdict": "sat",
+    "timeout": 600,
+    "description": "20-D collision-avoidance classifier (gelu): margin >= 0 certified on an L-inf box (eps=0.020).",
+    "points": 12
+}

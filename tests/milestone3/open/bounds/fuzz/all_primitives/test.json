@@ -1,0 +1,31 @@
+{
+    "command": "fuzz_affine_bounds",
+    "n_trials": 30,
+    "seed": 5024369,
+    "primitives": [
+        "neg",
+        "relu",
+        "leaky_relu",
+        "elu",
+        "gelu",
+        "exp",
+        "add",
+        "mul",
+        "dot",
+        "expand_dims",
+        "moveaxis",
+        "reshape",
+        "reduce_sum",
+        "pad",
+        "conv",
+        "avgpool"
+    ],
+    "check_nan_inf": false,
+    "eps_min": 0.001,
+    "eps_max": 0.5,
+    "n_eval_samples": 3,
+    "sample_atol": 1e-06,
+    "sample_rtol": 1e-06,
+    "description": "fuzz CROWN affine_bounds with all CROWN-supported primitives to verify robustness, including numerically unsafe ops (bilinear dot excluded).",
+    "points": 38
+}
