@@ -2,6 +2,8 @@
 # Licensed under the MIT License.
 from dataclasses import dataclass
 
+import numpy as np
+
 from minijax import core
 from minijax.core import relu
 from minijax.eval import Array, zeros
@@ -55,10 +57,13 @@ def linear_lower_bound(cg, var_bounds, params, rules):
         out_w = get_w(eqn.outvar)
 
         if eqn.primitive in rules:
-            in_ws, in_b = rules[eqn.primitive](params[eqn.outvar], out_w, *in_bounds, **eqn.options)
+            in_ws, in_b = rules[eqn.primitive](params.get(eqn.outvar), out_w, *in_bounds, **eqn.options)
             bias = bias + in_b
         elif eqn.primitive in linear_primitives:
             in_ws = transpose_weights(eqn.primitive, out_w, *in_bounds, **eqn.options)
+        elif eqn.primitive in affine_primitives:
+            in_ws, in_b = lbp_affine(eqn.primitive, out_w, *in_bounds, **eqn.options)
+            bias = bias + in_b
         elif eqn.primitive in bilinear_primitives:
             in_ws = lbp_linear(eqn.primitive, out_w, *in_bounds, **eqn.options)
         else:
@@ -102,5 +107,75 @@ linear_primitives = (
     core.neg,
     core.add,
     core.reduce_sum,
+    core.concat_two,
+    core.head,
+    core.tail,
 )
+
+# Affine in their first argument, constant in the remaining ones (conv kernel,
+# pad value/config, pooling window).
+affine_primitives = (core.pad, core.conv, core.avgpool, core.sumpool)
+
 bilinear_primitives = (core.dot, core.mul)
+
+
+def _concrete(a):
+    """The value of an atom, ignoring its interval width (linear maps don't care)."""
+    return a.lb if isinstance(a, Box) else a
+
+
+_adjoint_cache = {}
+
+
+def _adjoint_matrix(primitive, out_shape, in_shape, primals, options):
+    """Materialise the transpose of a constant linear map as a matrix.
+
+    The vjp rules for pad/conv/avgpool are written in numpy and read ``.array``,
+    so they cannot be applied to the traced weights of the alpha optimisation.
+    Their transpose only depends on the shapes and the (constant) extra
+    arguments though, so we build it once by pushing basis vectors through the
+    numpy rule and reuse it afterwards.
+    """
+    key = (
+        primitive.name,
+        tuple(out_shape),
+        tuple(in_shape),
+        repr(sorted(options.items())),
+        tuple(id(p) for p in primals),
+    )
+    if key in _adjoint_cache:
+        return _adjoint_cache[key][0]
+
+    n_out, n_in = int(np.prod(out_shape)), int(np.prod(in_shape))
+    args = [Array(np.asarray(p.array)) for p in primals]
+    basis = np.zeros(out_shape)
+    flat = basis.reshape(-1)
+    matrix = np.zeros((n_out, n_in))
+    for i in range(n_out):
+        flat[i] = 1.0
+        res = vjp_rules[primitive](Array(basis.copy()), None, *args, **options)
+        res = res if isinstance(res, tuple) else (res,)
+        matrix[i] = np.asarray(res[0].array).reshape(-1)
+        flat[i] = 0.0
+    _adjoint_cache[key] = (matrix, primals)
+    return matrix
+
+
+def lbp_affine(primitive, out_w, x, *rest, **options):
+    """Transpose a primitive that is affine in ``x`` and constant in ``rest``.
+
+    Splitting these out of ``linear_primitives`` also fixes conv: conv is
+    bilinear in (x, kernel), so the vjp's kernel gradient must not be folded
+    into the bias by the early-concretization branch.
+    """
+    if any(isinstance(a, Box) for a in rest):
+        raise NotImplementedError(f"No LBP rule for {primitive} with a non-constant argument.")
+    x_val = _concrete(x)
+    in_shape = x_val.shape
+    matrix = _adjoint_matrix(primitive, out_w.shape, in_shape, (x_val,) + rest, options)
+    flat_w = core.reshape(out_w, new_shape=(int(np.prod(out_w.shape)),))
+    in_w = core.reshape(flat_w @ Array(matrix), new_shape=in_shape)
+    # constant offset of the affine map (a pad with a non-zero fill value)
+    offset = primitive(zeros(in_shape), *rest, **options)
+    in_bias = lbp_inner(out_w, offset)
+    return (in_w,) + tuple(zeros(a.shape) for a in rest), in_bias

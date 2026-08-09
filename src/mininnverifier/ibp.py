@@ -164,17 +164,16 @@ def ibp_reciprocal(x):
 def ibp_dot_box_box(x, y):
     xl, xu = x.lb.array, x.ub.array
     yl, yu = y.lb.array, y.ub.array
-    if yl.ndim <= 1:
+    if yl.ndim <= 1:  # (..., J) @ (J,) -> (...)
         c = [xl * yl, xl * yu, xu * yl, xu * yu]
-        lo = np.minimum.reduce(c)
-        hi = np.maximum.reduce(c)
-        return Array(lo.sum(-1)), Array(hi.sum(-1))
-    else:
-        xl_e, xu_e = xl[..., :, None], xu[..., :, None]
-        c = [xl_e * yl, xl_e * yu, xu_e * yl, xu_e * yu]
-        lo = np.minimum.reduce(c)
-        hi = np.maximum.reduce(c)
-        return Array(lo.sum(-2)), Array(hi.sum(-2))
+        return Array(np.minimum.reduce(c).sum(-1)), Array(np.maximum.reduce(c).sum(-1))
+    if xl.ndim <= 1:  # (J,) @ (..., J, K) -> (..., K)
+        xl_e, xu_e = xl[:, None], xu[:, None]
+    else:  # (..., I, J) @ (..., J, K) -> (..., I, K); batch dims must line up
+        xl_e, xu_e = xl[..., :, :, None], xu[..., :, :, None]
+        yl, yu = yl[..., None, :, :], yu[..., None, :, :]
+    c = [xl_e * yl, xl_e * yu, xu_e * yl, xu_e * yu]
+    return Array(np.minimum.reduce(c).sum(-2)), Array(np.maximum.reduce(c).sum(-2))
 
 custom_primitives = {
     core.square: ibp_square,
@@ -199,7 +198,7 @@ mono_non_dec_primitives = {
     core.expand_dims,
     core.moveaxis,
     core.reshape,
-    core.concat,
+    core.concat_two,
     core.head,
     core.tail,
     core.add,

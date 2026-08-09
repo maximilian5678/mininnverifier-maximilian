@@ -111,7 +111,7 @@ def np_unpad(t, config, axes, original_shape):
             idx[ax] = slice(None, None, m + 1)
             result = result[tuple(idx)]
     
-    return broadcast_to(Array(result), Array(np.zeros(original_shape)))
+    return broadcast_to(Array(result), tuple(original_shape))
 
 def vjp_conv(t, _, x, k, stride):
     """
@@ -182,6 +182,20 @@ def vjp_avgpool(t, _, x, window_size, stride):
     return Array(dx)
 
 
+def vjp_sumpool(t, _, x, window_size, stride):
+    """Scatter-add adjoint of a sliding-window sum (avgpool without the 1/|w|)."""
+    t_np = t.array
+    x_np = x.array
+    dx = np.zeros_like(x_np)
+    for offset in np.ndindex(*window_size):
+        slicer = tuple(
+            slice(offset[i], offset[i] + stride[i] * t_np.shape[i], stride[i])
+            for i in range(x_np.ndim)
+        )
+        dx[slicer] += t_np
+    return Array(dx)
+
+
 def vjp_concat_two(t, _, x, __, axis):
     return (core.head(t, axis, x.shape[axis]), core.tail(t, axis, x.shape[axis]))
 
@@ -218,6 +232,7 @@ vjp_rules = {
     core.pad: lambda t, _, x, config, axes, value: np_unpad(t, config, axes, x.shape),
     core.conv: vjp_conv,
     core.avgpool: vjp_avgpool,
+    core.sumpool: vjp_sumpool,
     core.relu: lambda t, _, x: core.where(x > 0, t, 0),
     core.square: lambda t, _, x: t * 2 * x,
     core.sqrt: lambda t, _, x: t / (2 * core.sqrt(x)),
