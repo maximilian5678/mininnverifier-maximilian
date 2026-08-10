@@ -9,10 +9,13 @@ See verify.py for more details.
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 import numpy as np
+
+np.seterr(divide="ignore", invalid="ignore", over="ignore")
 
 from minijax.serialize import load
 from minijax.jit import run_graph
@@ -27,6 +30,12 @@ def main():
         description="Verify margin(x) >= 0 over an input box via node-splitting BaB."
     )
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--time-limit", type=float, default=float(os.environ.get("VERIFY2_TIME_LIMIT", 540.0)),
+        help="wall-clock budget in seconds; the test runner kills us at its own timeout, "
+             "so stop a little earlier and spend what is left on a final attack.",
+    )
+    parser.add_argument("--beta-iters", type=int, default=8)
     parser.add_argument("network", type=str)
     parser.add_argument("inputs", nargs="*", type=str)
     args = parser.parse_args()
@@ -53,7 +62,9 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        counterexample = node_splitting_bab(margin)(x_box)
+        counterexample = node_splitting_bab(
+            margin, time_limit=args.time_limit, beta_iters=args.beta_iters
+        )(x_box)
     except RuntimeError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(2)

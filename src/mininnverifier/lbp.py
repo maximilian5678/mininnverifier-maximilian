@@ -40,21 +40,35 @@ def get_in_bounds(in_atoms, var_bounds):
     return [a.value if a.is_const else var_bounds[a] for a in in_atoms]
 
 
-def linear_lower_bound(cg, var_bounds, params, rules):
-    if len(cg.outvars) != 1:
-        raise NotImplementedError("LBP only supports functions with a single return value.")
-    if cg.outvars[0].shape not in ((), (1,)):
-        raise NotImplementedError("LBP only supports functions with a scalar output.")
+def linear_lower_bound(cg, var_bounds, params, rules, seed=None, equations=None, record=None):
+    """Back-substitute a linear lower bound to the graph inputs.
 
-    weights = {cg.outvars[0]: Array(1.0)}
+    ``seed`` starts the backward pass from an arbitrary var and weight instead of
+    the graph output (used to bound intermediate neurons); ``equations`` limits
+    the pass to a prefix of the graph; ``record``, if given, collects the
+    outgoing weight of every equation, which the branch-and-bound split
+    heuristic scores.
+    """
+    if seed is None:
+        if len(cg.outvars) != 1:
+            raise NotImplementedError("LBP only supports functions with a single return value.")
+        if cg.outvars[0].shape not in ((), (1,)):
+            raise NotImplementedError("LBP only supports functions with a scalar output.")
+        seed = {cg.outvars[0]: Array(1.0)}
+
+    weights = dict(seed)
     bias = Array(0.0)
+    if equations is None:
+        equations = cg.equations
 
     def get_w(var):
         return weights.get(var, zeros(var.shape))
 
-    for eqn in reversed(cg.equations):
+    for eqn in reversed(equations):
         in_bounds = get_in_bounds(eqn.inputs, var_bounds)
         out_w = get_w(eqn.outvar)
+        if record is not None:
+            record[eqn.outvar] = out_w
 
         if eqn.primitive in rules:
             in_ws, in_b = rules[eqn.primitive](params.get(eqn.outvar), out_w, *in_bounds, **eqn.options)
