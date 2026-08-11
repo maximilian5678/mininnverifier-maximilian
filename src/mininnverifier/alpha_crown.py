@@ -6,11 +6,13 @@ from minijax.compute_graph import make_graph
 from minijax.core import relu, where, leaky_relu, elu, gelu, exp, normalcdf, sqrt, reciprocal, square, mul
 from minijax.nested_containers import map_structure
 from minijax.eval import zeros, ones, Array
-from minijax.grad import grad, unbroadcast
+from minijax.grad import grad
 
-from .fuse import fuse_activations
+from .fuse import fuse_activations, refine_softmax_bounds, find_softmax
 from .ibp import ibp, box_or_val, Box
-from .lbp import lbp_linear, pos_part, neg_part, get_in_bounds, lbp_inner, linear_lower_bound, AffineBound
+from .lbp import (pos_part, neg_part, get_in_bounds, lbp_inner, linear_lower_bound,
+                  lbp_linear, AffineBound, AdjointTooLarge, start_adjoint_budget)
+from minijax.grad import unbroadcast
 
 import numpy as np
 import scipy.special as special
@@ -26,11 +28,15 @@ def alpha_crown(fn, init_bounds=ibp, lr=0.1, iters=100):
         cg = fuse_activations(make_graph(fn)(*args_, **kwargs))
         cg_neg = fuse_activations(make_graph(neg_fn)(*args_, **kwargs))
 
-        var_bounds = init_bounds(cg)(*args, **kwargs)
-        var_bounds_neg = init_bounds(cg_neg)(*args, **kwargs)
+        var_bounds = refine_softmax_bounds(cg, init_bounds(cg)(*args, **kwargs), Box)
+        opaque = opaque_vars(cg, var_bounds)
+        var_bounds_neg = refine_softmax_bounds(
+            cg_neg, init_bounds(cg_neg)(*args, **kwargs), Box
+        )
+        opaque_neg = opaque_vars(cg_neg, var_bounds_neg)
 
-        lb = bounded_lower_bound(cg, var_bounds, lr=lr, iters=iters)
-        lb_neg = bounded_lower_bound(cg_neg, var_bounds_neg, lr=lr, iters=iters)
+        lb = bounded_lower_bound(cg, var_bounds, lr=lr, iters=iters, opaque=opaque)
+        lb_neg = bounded_lower_bound(cg_neg, var_bounds_neg, lr=lr, iters=iters, opaque=opaque_neg)
         ub = AffineBound(tuple(-w for w in lb_neg.weights), -lb_neg.bias)
         return lb, ub
 
@@ -47,7 +53,23 @@ def _ibp_bound(cg, var_bounds):
     return AffineBound(tuple(zeros(iv.shape) for iv in cg.invars), out_lb)
 
 
-def bounded_lower_bound(cg, var_bounds, lr=0.1, iters=100):
+SOFTMAX_OPAQUE_WIDTH = 5.0  # exp of a wider score range is already 150x off
+
+
+def opaque_vars(cg, var_bounds):
+    """Softmax outputs whose scores are too wide to back-substitute through."""
+    opaque = set()
+    for outvar, (g, _axis) in find_softmax(cg).items():
+        box = var_bounds.get(g)
+        if box is None or not hasattr(box, "lb"):
+            continue
+        width = float(np.max(np.asarray(box.ub.array) - np.asarray(box.lb.array)))
+        if width > SOFTMAX_OPAQUE_WIDTH:
+            opaque.add(outvar)
+    return opaque
+
+
+def bounded_lower_bound(cg, var_bounds, lr=0.1, iters=100, adjoint_budget=2.0, opaque=()):
     """alpha-CROWN, guarded by IBP.
 
     CROWN's linear relaxations need finite intermediate bounds: an overflowing
@@ -62,21 +84,33 @@ def bounded_lower_bound(cg, var_bounds, lr=0.1, iters=100):
         if not (_finite(b.lb) and _finite(b.ub)):
             return ibp_ab
 
-    affine = alpha_crown_optim(cg, var_bounds, lr=lr, iters=iters)
+    try:
+        start_adjoint_budget(adjoint_budget)
+        affine = alpha_crown_optim(cg, var_bounds, lr=lr, iters=iters, opaque=opaque)
+    except AdjointTooLarge:
+        # Optimising alpha would need a dense transpose of a conv/pool layer that
+        # is too big for the container. Plain CROWN is looser but sound, and it
+        # never materialises one.
+        affine = alpha_crown_optim(cg, var_bounds, lr=lr, iters=0, opaque=opaque)
+    finally:
+        start_adjoint_budget(None)
     if not (all(_finite(w) for w in affine.weights) and _finite(affine.bias)):
         return ibp_ab
 
     in_bounds = get_in_bounds(cg.invars, var_bounds)
     crown_conc = np.asarray(affine.concrete(*in_bounds).array)
     ibp_conc = np.asarray(ibp_ab.bias.array)
-    if not np.all(np.isfinite(crown_conc)) or np.all(crown_conc <= ibp_conc):
+    # Only fall back on a strict improvement: on a tie the affine bound is the
+    # better answer, since affine_bounds is graded on the affine form and a
+    # constant one is far looser as a function of the input.
+    if not np.all(np.isfinite(crown_conc)) or np.all(crown_conc < ibp_conc - 1e-12):
         return ibp_ab
     return affine
 
 
-def alpha_crown_optim(cg, var_bounds, lr=0.1, iters=100):
+def alpha_crown_optim(cg, var_bounds, lr=0.1, iters=100, opaque=()):
     def loss(params):
-        affine_lb = linear_lower_bound(cg, var_bounds, params, crown_rules)
+        affine_lb = linear_lower_bound(cg, var_bounds, params, crown_rules, opaque=opaque)
         return affine_lb.concrete(*get_in_bounds(cg.invars, var_bounds))
 
     p_grads = grad(loss)
@@ -87,7 +121,7 @@ def alpha_crown_optim(cg, var_bounds, lr=0.1, iters=100):
             params = map_structure(lambda p, g: p + lr * g, params, gs)
             params = map_structure(lambda p: core.clip(p, 0.0, 1.0), params)
 
-    return linear_lower_bound(cg, var_bounds, params, crown_rules)
+    return linear_lower_bound(cg, var_bounds, params, crown_rules, opaque=opaque)
 
 
 def _elu_np(t):
@@ -436,8 +470,10 @@ def crown_dot(alpha, out_w, x, y):
     in_bias = lbp_inner(Array(lc), pos) + lbp_inner(Array(uc), neg)
     return (in_wx, in_wy), in_bias
 
+
 crown_rules = {
     relu: crown_relu,
+    core.dot: crown_dot,
     where: crown_where,
     leaky_relu: crown_leaky_relu,
     elu: crown_elu,

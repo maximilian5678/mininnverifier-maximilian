@@ -2,6 +2,8 @@
 # Licensed under the MIT License.
 from dataclasses import dataclass
 
+import time
+
 import numpy as np
 
 from minijax import core
@@ -40,7 +42,8 @@ def get_in_bounds(in_atoms, var_bounds):
     return [a.value if a.is_const else var_bounds[a] for a in in_atoms]
 
 
-def linear_lower_bound(cg, var_bounds, params, rules, seed=None, equations=None, record=None):
+def linear_lower_bound(cg, var_bounds, params, rules, seed=None, equations=None, record=None,
+                       opaque=()):
     """Back-substitute a linear lower bound to the graph inputs.
 
     ``seed`` starts the backward pass from an arbitrary var and weight instead of
@@ -69,6 +72,14 @@ def linear_lower_bound(cg, var_bounds, params, rules, seed=None, equations=None,
         out_w = get_w(eqn.outvar)
         if record is not None:
             record[eqn.outvar] = out_w
+        if eqn.outvar in opaque:
+            # Softmax and friends: the subgraph behind this var propagates
+            # astronomically wide intermediate boxes (exp of a wide score
+            # range), so back-substituting through it wrecks the bound. Its own
+            # box is tight, so concretise here and stop.
+            box = var_bounds[eqn.outvar]
+            bias = bias + lbp_inner(box.lb, pos_part(out_w)) + lbp_inner(box.ub, neg_part(out_w))
+            continue
 
         if eqn.primitive in rules:
             in_ws, in_b = rules[eqn.primitive](params.get(eqn.outvar), out_w, *in_bounds, **eqn.options)
@@ -138,7 +149,26 @@ def _concrete(a):
     return a.lb if isinstance(a, Box) else a
 
 
+MAX_ADJOINT_ENTRIES = 2_000_000  # ~16 MB per cached matrix
+
+
+class AdjointTooLarge(Exception):
+    """The dense transpose of this primitive is too expensive to materialise."""
+
+
 _adjoint_cache = {}
+_adjoint_deadline = [None]
+
+
+def start_adjoint_budget(seconds):
+    """Cap the total time spent materialising dense transposes in one call.
+
+    Building a transpose costs one vjp call per output element, which grows
+    quartically with the spatial size of a conv layer: harmless on a 6x6 input,
+    minutes on a large one. Callers that can fall back to unoptimised CROWN set
+    a budget here instead of guessing a shape limit.
+    """
+    _adjoint_deadline[0] = None if seconds is None else time.monotonic() + seconds
 
 
 def _adjoint_matrix(primitive, out_shape, in_shape, primals, options):
@@ -161,11 +191,16 @@ def _adjoint_matrix(primitive, out_shape, in_shape, primals, options):
         return _adjoint_cache[key][0]
 
     n_out, n_in = int(np.prod(out_shape)), int(np.prod(in_shape))
+    if n_out * n_in > MAX_ADJOINT_ENTRIES:
+        raise AdjointTooLarge(f"{primitive.name}: {n_out}x{n_in} adjoint")
     args = [Array(np.asarray(p.array)) for p in primals]
     basis = np.zeros(out_shape)
     flat = basis.reshape(-1)
     matrix = np.zeros((n_out, n_in))
+    deadline = _adjoint_deadline[0]
     for i in range(n_out):
+        if deadline is not None and i % 64 == 0 and time.monotonic() > deadline:
+            raise AdjointTooLarge(f"{primitive.name}: transpose budget exhausted")
         flat[i] = 1.0
         res = vjp_rules[primitive](Array(basis.copy()), None, *args, **options)
         res = res if isinstance(res, tuple) else (res,)
@@ -186,9 +221,17 @@ def lbp_affine(primitive, out_w, x, *rest, **options):
         raise NotImplementedError(f"No LBP rule for {primitive} with a non-constant argument.")
     x_val = _concrete(x)
     in_shape = x_val.shape
-    matrix = _adjoint_matrix(primitive, out_w.shape, in_shape, (x_val,) + rest, options)
-    flat_w = core.reshape(out_w, new_shape=(int(np.prod(out_w.shape)),))
-    in_w = core.reshape(flat_w @ Array(matrix), new_shape=in_shape)
+    if isinstance(out_w, Array):
+        # Concrete weights: the numpy vjp applies directly and costs O(size)
+        # instead of materialising an O(size^2) matrix. Only the traced weights
+        # of the alpha optimisation need the matrix.
+        transposed = transpose_weights(primitive, out_w, x_val, *rest, **options)
+        # single-argument primitives return a bare weight, not a tuple
+        in_w = transposed[0] if isinstance(transposed, tuple) else transposed
+    else:
+        matrix = _adjoint_matrix(primitive, out_w.shape, in_shape, (x_val,) + rest, options)
+        flat_w = core.reshape(out_w, new_shape=(int(np.prod(out_w.shape)),))
+        in_w = core.reshape(flat_w @ Array(matrix), new_shape=in_shape)
     # constant offset of the affine map (a pad with a non-zero fill value)
     offset = primitive(zeros(in_shape), *rest, **options)
     in_bias = lbp_inner(out_w, offset)
