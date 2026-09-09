@@ -97,14 +97,12 @@ def np_unpad(t, config, axes, original_shape):
     
     result = t.array
     
-    # left/right cutoff
     idx = [slice(None)] * ndim
     for ax in axes:
         s = result.shape[ax]
         idx[ax] = slice(l, s - r if r > 0 else None)
     result = result[tuple(idx)]
     
-    # interior padding cutoff
     if m > 0:
         for ax in axes:
             idx = [slice(None)] * ndim

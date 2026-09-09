@@ -1,20 +1,13 @@
-# Copyright (c) 2026 by David Boetius
-# Licensed under the MIT License.
-"""Intermediate bounds via CROWN instead of interval propagation.
+"""CROWN-based intermediate bound calculation for neural network verification.
 
-IBP bounds degrade exponentially with depth: on a 6x50 ReLU network every single
-neuron comes out unstable, which makes node-splitting branch and bound hopeless.
-Back-substituting a linear bound for each neuron instead keeps the intermediate
-boxes usable, so there is something left to branch on.
-
-The backward pass is seeded per neuron because the LBP machinery carries one
-weight per variable element, not a weight matrix. We keep the resulting affine
-forms around: they are valid on the whole root box, so concretising them over a
-sub-box gives tightened intermediate bounds for an input split for free, without
-redoing any backward pass.
+Calculates linear relaxation bounds (CROWN) for intermediate activation 
+nodes to replace weak interval bounds (IBP). Computes and caches affine 
+forms across the root input box so sub-boxes can be concretized instantly 
+during branch-and-bound without re-running backward passes.
 """
 
 import numpy as np
+import scipy.special as special
 
 from minijax import core
 from minijax.core import relu, elu, gelu, leaky_relu
@@ -28,8 +21,6 @@ ACTIVATIONS = (relu, elu, gelu, leaky_relu)
 
 class AffineForms:
     """Per-element affine lower/upper bounds of one var, as a function of the input.
-
-    ``w_lo``/``w_hi`` have shape (n_elements, n_input_elements).
     """
 
     def __init__(self, shape, w_lo, b_lo, w_hi, b_hi):
@@ -46,7 +37,6 @@ class AffineForms:
 
 
 def _refine_targets(cg):
-    """Vars worth spending a backward pass on: the activation inputs."""
     targets = {}
     for i, eqn in enumerate(cg.equations):
         if eqn.primitive in ACTIVATIONS and not eqn.inputs[0].is_const:
@@ -55,7 +45,6 @@ def _refine_targets(cg):
 
 
 def ibp_step(eqn, arg_boxes):
-    """One interval-propagation step for a single equation."""
     with core.new_interpreter(IBPInterpreter()) as interp:
         vals = [interp.wrap(a) for a in arg_boxes]
         out = eqn.primitive(*vals, **eqn.options)
@@ -64,12 +53,10 @@ def ibp_step(eqn, arg_boxes):
 
 def crown_var_bounds(cg, x_bounds, rules, max_neurons=4000):
     """Interval bounds for every var, refined by CROWN on the activation inputs.
-
     Returns the bounds and the affine forms used to tighten them.
     """
     targets = _refine_targets(cg)
     var_bounds = {iv: xb for iv, xb in zip(cg.invars, x_bounds)}
-    in_bounds = list(x_bounds)
     forms = {}
     budget = max_neurons
 
@@ -87,7 +74,7 @@ def crown_var_bounds(cg, x_bounds, rules, max_neurons=4000):
         budget -= n
         prefix = cg.equations[: i + 1]
         form = batched_affine_forms(cg, var_bounds, v, prefix)
-        if form is None:  # primitive outside the fast path
+        if form is None:
             form = _affine_forms(cg, var_bounds, rules, v, prefix)
         forms[v] = form
         lb, ub = form.concretize(x_bounds[0])
@@ -126,24 +113,99 @@ def _affine_forms(cg, var_bounds, rules, v, prefix):
     return AffineForms(v.shape, w_lo, b_lo, w_hi, b_hi)
 
 
-# ---------------------------------------------------------------------------
-# Batched backward pass
-#
-# The per-neuron loop above costs one Python-level backward pass per neuron,
-# which is the single most expensive step in the verifier. Intermediate bounds
-# need no gradients, so for the primitives that make up dense/ReLU networks we
-# can run the whole layer in one shot in plain numpy: the weights simply carry a
-# leading "which neuron" axis. Anything else falls back to the generic path.
-# ---------------------------------------------------------------------------
 
+# Batched backward pass
 BATCHED_PRIMITIVES = (
     core.dot, core.add, core.mul, core.neg, core.reshape, core.expand_dims,
-    core.moveaxis, core.reduce_sum, core.relu,
+    core.moveaxis, core.reduce_sum, core.concat_two, core.head, core.tail,
+    core.relu, core.leaky_relu, core.elu, core.gelu,
 )
+
+_SQRT2 = np.sqrt(2.0)
+_GELU_ARGMIN = -0.7517913647329811
+_GELU_MIN = -0.1699712074798982
+
+
+def _elu_np(t):
+    return np.where(t >= 0.0, t, np.exp(np.minimum(t, 0.0)) - 1.0)
+
+
+def _elu_deriv_np(t):
+    return np.where(t >= 0.0, 1.0, np.exp(np.minimum(t, 0.0)))
+
+
+def _ncdf_np(t):
+    return 0.5 * (1.0 + special.erf(t / _SQRT2))
+
+
+def _gelu_np(t):
+    return t * _ncdf_np(t)
+
+
+def _gelu_deriv_np(t):
+    return _ncdf_np(t) + t * np.exp(-0.5 * t * t) / np.sqrt(2.0 * np.pi)
+
+
+def _act_planes(primitive, options, lb, ub):
+    denom = ub - lb
+    same = denom <= 0.0
+    safe = np.where(same, 1.0, denom)
+    pos, neg = lb >= 0.0, ub <= 0.0
+    zero = np.zeros_like(lb)
+
+    if primitive is relu:
+        unstable = ~(pos | neg)
+        u_slope = np.where(unstable, ub / safe, np.where(pos, 1.0, 0.0))
+        u_off = np.where(unstable, -ub * lb / safe, 0.0)
+        l_slope = np.where(unstable, np.where(-lb >= ub, 0.0, 1.0), u_slope)
+        return l_slope, zero, u_slope, u_off
+
+    if primitive is leaky_relu:
+        s = options.get("slope", 0.01)
+        u_slope = np.where(pos, 1.0, np.where(neg, s, (ub - s * lb) / safe))
+        u_off = np.where(pos | neg, 0.0, -(1.0 - s) * ub * lb / safe)
+        l_slope = np.where(pos, 1.0, np.where(neg, s, np.where(-lb >= ub, s, 1.0)))
+        return l_slope, zero, u_slope, u_off
+
+    if primitive is elu:
+        f_lb, f_ub = _elu_np(lb), _elu_np(ub)
+        u_slope = np.where(same, _elu_deriv_np(lb), (f_ub - f_lb) / safe)
+        u_off = f_ub - u_slope * ub
+        t = 0.5 * (lb + ub)
+        l_slope = _elu_deriv_np(t)
+        return l_slope, _elu_np(t) - l_slope * t, u_slope, u_off
+
+    if primitive is gelu:
+        g_lb, g_ub = _gelu_np(lb), _gelu_np(ub)
+        secant = np.where(same, _gelu_deriv_np(lb), (g_ub - g_lb) / safe)
+        secant_off = g_lb - secant * lb
+        t = 0.5 * (lb + ub)
+        tangent = _gelu_deriv_np(t)
+        tangent_off = _gelu_np(t) - tangent * t
+        convex = (lb >= -_SQRT2) & (ub <= _SQRT2)
+        concave = (lb >= _SQRT2) | (ub <= -_SQRT2)
+        mixed = ~(convex | concave)
+        l_slope = np.where(convex, tangent, np.where(concave, secant, 0.0))
+        l_off = np.where(convex, tangent_off, np.where(concave, secant_off, 0.0))
+        u_slope = np.where(convex, secant, np.where(concave, tangent, 0.0))
+        u_off = np.where(convex, secant_off, np.where(concave, tangent_off, 0.0))
+        contains_min = (lb <= _GELU_ARGMIN) & (ub >= _GELU_ARGMIN)
+        l_off = np.where(
+            mixed, np.where(contains_min, _GELU_MIN, np.minimum(g_lb, g_ub)), l_off
+        )
+        u_off = np.where(mixed, np.maximum(g_lb, g_ub), u_off)
+        return l_slope, l_off, u_slope, u_off
+
+    return None
+
+
+def _slice_at(ndim, axis, sl):
+    idx = [slice(None)] * ndim
+    idx[1 + axis] = sl
+    return tuple(idx)
 
 
 def _unbcast(w, shape):
-    """Reduce a batched weight down to (batch,) + shape."""
     extra = w.ndim - 1 - len(shape)
     if extra > 0:
         w = w.sum(axis=tuple(range(1, 1 + extra)))
@@ -153,26 +215,13 @@ def _unbcast(w, shape):
     return w
 
 
-def _np_of(atom, var_bounds):
-    if atom.is_const:
-        return np.asarray(atom.value.array)
-    box = var_bounds[atom]
-    return None if isinstance(box, Box) else np.asarray(box.array)
-
-
 def batched_affine_forms(cg, var_bounds, v, prefix):
-    """Affine bounds for every element of ``v`` in a single backward sweep.
-
-    Returns None if the prefix uses a primitive this fast path doesn't cover.
-    """
     if any(eqn.primitive not in BATCHED_PRIMITIVES for eqn in prefix):
         return None
     shape = v.shape if v.shape else (1,)
     n = int(np.prod(shape))
     invar = cg.invars[0]
 
-    # Two sweeps in one batch: the first n rows bound v from below, the next n
-    # bound -v (i.e. v from above).
     seed = np.concatenate([np.eye(n), -np.eye(n)]).reshape((2 * n,) + shape)
     weights = {v: seed}
     bias = np.zeros(2 * n)
@@ -235,38 +284,54 @@ def _batched_rule(eqn, w, var_bounds):
         x, y = eqn.inputs
         xc = np.asarray(x.value.array) if x.is_const else None
         yc = np.asarray(y.value.array) if y.is_const else None
-        # np.dot has a different contraction for every ndim combination, so key
-        # on both operands rather than on the constant one alone.
+
         if yc is not None:
-            if yc.ndim == 1:  # (..., m) @ (m,) -> (...)
+            if yc.ndim == 1:
                 return (w[..., None] * yc, None), None
-            if yc.ndim == 2:  # (..., n) @ (n, m) -> (..., m)
+            if yc.ndim == 2:
                 return (w @ yc.T, None), None
             return None, None
         if xc is not None:
             yd = len(y.shape)
-            if xc.ndim == 1 and yd == 1:  # (m,) @ (m,) -> ()
+            if xc.ndim == 1 and yd == 1:
                 return (None, w[..., None] * xc), None
-            if xc.ndim == 1 and yd == 2:  # (m,) @ (m, k) -> (k,)
+            if xc.ndim == 1 and yd == 2:
                 return (None, xc[:, None] * w[:, None, :]), None
-            if xc.ndim == 2 and yd == 1:  # (n, m) @ (m,) -> (n,)
+            if xc.ndim == 2 and yd == 1:
                 return (None, w @ xc), None
-            if xc.ndim == 2 and yd == 2:  # (n, m) @ (m, k) -> (n, k)
+            if xc.ndim == 2 and yd == 2:
                 return (None, xc.T @ w), None
             return None, None
         return None, None
-    if p is core.relu:
+    if p is core.head:
+        ax = eqn.options["axis"] % len(eqn.inputs[0].shape)
+        in_w = np.zeros((w.shape[0],) + eqn.inputs[0].shape)
+        in_w[_slice_at(in_w.ndim, ax, slice(0, eqn.options["index"]))] = w
+        return (in_w,), None
+    if p is core.tail:
+        ax = eqn.options["axis"] % len(eqn.inputs[0].shape)
+        in_w = np.zeros((w.shape[0],) + eqn.inputs[0].shape)
+        in_w[_slice_at(in_w.ndim, ax, slice(eqn.options["index"], None))] = w
+        return (in_w,), None
+    if p is core.concat_two:
+        ax = eqn.options["axis"] % len(eqn.outvar.shape)
+        n0 = eqn.inputs[0].shape[ax]
+        return (
+            w[_slice_at(w.ndim, ax, slice(0, n0))].copy(),
+            w[_slice_at(w.ndim, ax, slice(n0, None))].copy(),
+        ), None
+    if p in (core.relu, core.leaky_relu, core.elu, core.gelu):
         box = var_bounds[eqn.inputs[0]]
+        if not isinstance(box, Box):
+            return None, None
         lb, ub = np.asarray(box.lb.array), np.asarray(box.ub.array)
-        unstable = (lb < 0.0) & (ub > 0.0)
-        denom = np.where(unstable, ub - lb, 1.0)
-        u_slope = np.where(unstable, ub / denom, np.where(lb >= 0.0, 1.0, 0.0))
-        u_off = np.where(unstable, -ub * lb / denom, 0.0)
-        # match crown_relu's adaptive choice exactly, ties included
-        l_slope = np.where(unstable, np.where(-lb >= ub, 0.0, 1.0), u_slope)
+        planes = _act_planes(p, eqn.options, lb, ub)
+        if planes is None:
+            return None, None
+        l_slope, l_off, u_slope, u_off = planes
         pos = w >= 0.0
         slope = np.where(pos, l_slope, u_slope)
-        off = np.where(pos, 0.0, u_off)
+        off = np.where(pos, l_off, u_off)
         bias_add = (w * off).reshape(w.shape[0], -1).sum(-1)
         return (w * slope,), bias_add
     return None, None

@@ -16,14 +16,6 @@ from .alpha_crown import crown_relu, crown_rules, init_params as init_alpha_para
 
 
 def beta_crown_lb(cg, var_bounds, splits, warm_start=None, lr=0.05, iters=8, record=None):
-    """beta-CROWN lower bound for one branch.
-
-    ``splits`` maps a ReLU output var to an int array with +1 (forced active),
-    -1 (forced inactive) or 0 (not split). Returns the affine bound together
-    with the optimised parameters, so the caller can warm-start the children
-    with them - re-optimising from scratch in every branch is what makes naive
-    node splitting unusable.
-    """
     params = init_params(cg, var_bounds, splits) if warm_start is None else _copy(warm_start)
     split_arrays = {ov: Array(np.asarray(s, dtype=np.float64)) for ov, s in splits.items()}
 
@@ -45,8 +37,6 @@ def beta_crown_lb(cg, var_bounds, splits, warm_start=None, lr=0.05, iters=8, rec
         return (core.clip(node[0], 0.0, 1.0), core.maximum(node[1], 0.0))
 
     if len(params) > 0 and iters > 0:
-        # Trace the loss once and reuse the graph for every ascent step. minijax's
-        # grad() re-traces on each call, which dominates the per-branch cost.
         flat, structure = flatten(params)
         loss_cg = make_graph(lambda *ps: loss(unflatten(structure, ps)))(*flat)
         for _ in range(iters):

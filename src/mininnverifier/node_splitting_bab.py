@@ -2,6 +2,8 @@
 # Licensed under the MIT License.
 """Branch and bound over activation phases and, where it pays, over the input box."""
 
+import heapq
+import itertools
 import time
 
 import numpy as np
@@ -20,7 +22,7 @@ from .fuse import fuse_activations
 from .input_splitting_bab import split_longest_edge
 
 TOL = 1e-9
-MIN_WIDTH = 1e-6  # don't keep bisecting an interval that is already a point
+MIN_WIDTH = 1e-6
 ACTIVATIONS = (relu, leaky_relu, elu, gelu)
 
 
@@ -29,12 +31,6 @@ def activation_eqns(cg):
 
 
 def init_splits(act_eqns):
-    """No split yet: every activation input keeps its unconstrained interval.
-
-    A split is stored as a pair of clips rather than a ReLU phase, so that the
-    same mechanism covers smooth activations: for those a split bisects the
-    input interval instead of fixing a phase (there is no phase to fix).
-    """
     return {
         eqn.outvar: (
             np.full(eqn.inputs[0].shape, -np.inf),
@@ -46,11 +42,6 @@ def init_splits(act_eqns):
 
 def apply_node_splits(var_bounds, act_eqns, splits):
     """Intersect each activation's pre-activation box with its branch's clips.
-
-    Fixing a ReLU active means its input is non-negative on this branch, so the
-    relaxation for that neuron becomes exact; bisecting a GELU's input halves
-    the relaxation gap. This, rather than the beta multipliers alone, is what
-    makes node splitting pay off.
     """
     var_bounds = dict(var_bounds)
     for eqn in act_eqns:
@@ -66,9 +57,6 @@ def apply_node_splits(var_bounds, act_eqns, splits):
 
 def beta_signs(act_eqns, splits):
     """Lagrange sign per split ReLU: +1 forced active, -1 forced inactive, 0 free.
-
-    Only ReLU nodes get beta multipliers; for the smooth activations the clipped
-    interval is the whole constraint.
     """
     signs = {}
     for eqn in act_eqns:
@@ -95,15 +83,6 @@ def _relaxation_gap(primitive, lb, ub, options):
 
 def input_split_gain(affine, box, total_slack):
     """Bound improvement an input split can buy, in output units.
-
-    Two parts. The direct one: halving the widest weighted input edge removes
-    half of that edge's own concretisation slack. The indirect one matters far
-    more: a smaller box makes CROWN recompute *every* intermediate bound
-    tighter, shrinking all relaxation gaps at once. Halving one of n input
-    edges shrinks the box along a 1/n share, so we credit the input split with
-    that share of the total relaxation slack. Same units as the node scores,
-    which is what lets us choose between the two split kinds per branch instead
-    of alternating on a fixed schedule.
     """
     w = np.abs(np.asarray(affine.weights[0].array).reshape(-1))
     lb = np.asarray(box.lb.array).reshape(-1)
@@ -118,10 +97,6 @@ def input_split_gain(affine, box, total_slack):
 
 def pick_node_split(var_bounds, act_eqns, splits, record):
     """BaBSR-style heuristic: branch where the relaxation loses the most.
-
-    Score = relaxation gap times the weight the backward pass gave the neuron,
-    i.e. an estimate of how much the output bound improves once the neuron is
-    split. Same units as ``input_split_gain``.
     """
     best, best_score, total_slack = None, -np.inf, 0.0
     for eqn in act_eqns:
@@ -164,6 +139,9 @@ def node_splitting_bab(
     beta_iters=8,
     refine_fraction=0.5,
     input_split_bias=1.0,
+    refine_warmup=25,
+    refine_hit_rate=0.05,
+    refine_probe_every=400,
 ):
     """Branch and bound on top of beta-CROWN, over neuron phases and input box.
 
@@ -180,7 +158,7 @@ def node_splitting_bab(
         cg = fuse_activations(make_graph(fn)(x_bounds.lb))
         act_eqns = activation_eqns(cg)
 
-        counterexample = pgd_attack(fn, x_bounds, restarts=8, steps=40)
+        counterexample = pgd_attack(fn, x_bounds, restarts=4, steps=25)
         if counterexample is not None:
             return counterexample
 
@@ -194,17 +172,32 @@ def node_splitting_bab(
         ).reshape(-1)[0]
         refine_margin = max(abs(root_lb) * refine_fraction, 1e-6)
 
-        branches = [(-np.inf, x_bounds, base_splits, None, 0)]
-        visited = 0
+        # A heap instead of a list scan: best-first popped the worst branch with
+        # an argmin over the whole queue, which is O(n) per step once the queue
+        # runs into the thousands. The counter only breaks ties - boxes and
+        # split dicts are not ordered, so they must never reach a comparison.
+        # Refinement pays only if it actually prunes. It costs ~40x a plain
+        # backward pass, so we watch its hit rate and stop paying for it once it
+        # stops converting branches, re-probing occasionally in case the deeper
+        # part of the tree behaves differently.
+        tries = prunes = 0
+        probe_at = 0
+        tick = itertools.count()
+        branches = [(-np.inf, next(tick), x_bounds, base_splits, root_bounds, None, 0)]
         while branches:
             if time.monotonic() > deadline:
                 raise RuntimeError("verification budget exhausted")
 
-            worst = int(np.argmin([b[0] for b in branches]))
-            _, box, splits, warm_start, depth = branches.pop(worst)
+            _, _, box, splits, base, warm_start, depth = heapq.heappop(branches)
 
-            var_bounds = crown_var_bounds(cg, (box,), crown_rules)[0]
-            var_bounds = apply_node_splits(var_bounds, act_eqns, splits)
+            # A node split leaves the input box untouched, so the parent's CROWN
+            # intermediate bounds are still exactly the right ones. Only an input
+            # split invalidates them, and then they are recomputed lazily, on pop
+            # rather than on push, so children that are never explored cost
+            # nothing.
+            if base is None:
+                base = crown_var_bounds(cg, (box,), crown_rules)[0]
+            var_bounds = apply_node_splits(base, act_eqns, splits)
             in_bounds = get_in_bounds(cg.invars, var_bounds)
             signs = beta_signs(act_eqns, splits)
 
@@ -216,14 +209,19 @@ def node_splitting_bab(
                 cg, var_bounds, signs, warm_start=warm_start, iters=0, record=record
             )
             child_lb = np.asarray(affine.concrete(*in_bounds).array).reshape(-1)[0]
-            visited += 1
-            if child_lb < -TOL and child_lb > -refine_margin:
+            pops = next(tick) - 1
+            worth_it = tries < refine_warmup or prunes >= refine_hit_rate * tries
+            if pops >= probe_at:
+                worth_it, probe_at = True, pops + refine_probe_every
+            if beta_iters > 0 and worth_it and -refine_margin < child_lb < -TOL:
+                tries += 1
                 record = {}
                 affine, params = beta_crown_lb(
                     cg, var_bounds, signs, warm_start=params,
                     iters=beta_iters, record=record,
                 )
                 child_lb = np.asarray(affine.concrete(*in_bounds).array).reshape(-1)[0]
+                prunes += child_lb >= -TOL
             if child_lb >= -TOL:  # branch verified
                 continue
 
@@ -238,14 +236,16 @@ def node_splitting_bab(
             input_gain = input_split_bias * input_split_gain(affine, box, total_slack)
             if choice is None or input_gain > node_gain:
                 for child_box in split_longest_edge(box):
-                    branches.append((child_lb, child_box, splits, params, depth + 1))
+                    heapq.heappush(branches, (
+                        child_lb, next(tick), child_box, splits, None, params, depth + 1
+                    ))
                 continue
             for upper_half in (True, False):
-                branches.append(
-                    (child_lb, box, child_splits(splits, choice, upper_half),
-                     params, depth + 1)
-                )
+                heapq.heappush(branches, (
+                    child_lb, next(tick), box,
+                    child_splits(splits, choice, upper_half), base, params, depth + 1
+                ))
 
-        return None  # Verified
+        return None # Verified
 
     return bab_fn

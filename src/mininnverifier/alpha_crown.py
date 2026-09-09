@@ -10,8 +10,7 @@ from minijax.grad import grad
 
 from .fuse import fuse_activations, refine_softmax_bounds, find_softmax
 from .ibp import ibp, box_or_val, Box
-from .lbp import (pos_part, neg_part, get_in_bounds, lbp_inner, linear_lower_bound,
-                  lbp_linear, AffineBound, AdjointTooLarge, start_adjoint_budget)
+from .lbp import (pos_part, neg_part, get_in_bounds, lbp_inner, linear_lower_bound, lbp_linear, AffineBound, AdjointTooLarge, start_adjoint_budget)
 from minijax.grad import unbroadcast
 
 import numpy as np
@@ -20,7 +19,6 @@ import scipy.special as special
 
 def alpha_crown(fn, init_bounds=ibp, lr=0.1, iters=100):
     def bounds_fn(*args: Box | core.Value, **kwargs):
-        # -lb on -fn is ub on fn
         def neg_fn(*args, **kwargs):
             return -fn(*args, **kwargs)
 
@@ -48,16 +46,14 @@ def _finite(value):
 
 
 def _ibp_bound(cg, var_bounds):
-    """The IBP lower bound as a constant (zero-weight) affine bound."""
     out_lb = var_bounds[cg.outvars[0]].lb
     return AffineBound(tuple(zeros(iv.shape) for iv in cg.invars), out_lb)
 
 
-SOFTMAX_OPAQUE_WIDTH = 5.0  # exp of a wider score range is already 150x off
+SOFTMAX_OPAQUE_WIDTH = 5.0
 
 
 def opaque_vars(cg, var_bounds):
-    """Softmax outputs whose scores are too wide to back-substitute through."""
     opaque = set()
     for outvar, (g, _axis) in find_softmax(cg).items():
         box = var_bounds.get(g)
@@ -70,15 +66,6 @@ def opaque_vars(cg, var_bounds):
 
 
 def bounded_lower_bound(cg, var_bounds, lr=0.1, iters=100, adjoint_budget=2.0, opaque=()):
-    """alpha-CROWN, guarded by IBP.
-
-    CROWN's linear relaxations need finite intermediate bounds: an overflowing
-    exp/mul chain makes the secants and tangents degenerate and the back-
-    substituted result can silently turn into a finite but unsound number. In
-    that case, and whenever the affine bound concretises to something worse
-    than IBP, we return the IBP bound instead. That is never looser and always
-    sound.
-    """
     ibp_ab = _ibp_bound(cg, var_bounds)
     for b in var_bounds.values():
         if not (_finite(b.lb) and _finite(b.ub)):
@@ -88,9 +75,6 @@ def bounded_lower_bound(cg, var_bounds, lr=0.1, iters=100, adjoint_budget=2.0, o
         start_adjoint_budget(adjoint_budget)
         affine = alpha_crown_optim(cg, var_bounds, lr=lr, iters=iters, opaque=opaque)
     except AdjointTooLarge:
-        # Optimising alpha would need a dense transpose of a conv/pool layer that
-        # is too big for the container. Plain CROWN is looser but sound, and it
-        # never materialises one.
         affine = alpha_crown_optim(cg, var_bounds, lr=lr, iters=0, opaque=opaque)
     finally:
         start_adjoint_budget(None)
@@ -100,9 +84,6 @@ def bounded_lower_bound(cg, var_bounds, lr=0.1, iters=100, adjoint_budget=2.0, o
     in_bounds = get_in_bounds(cg.invars, var_bounds)
     crown_conc = np.asarray(affine.concrete(*in_bounds).array)
     ibp_conc = np.asarray(ibp_ab.bias.array)
-    # Only fall back on a strict improvement: on a tie the affine bound is the
-    # better answer, since affine_bounds is graded on the affine form and a
-    # constant one is far looser as a function of the input.
     if not np.all(np.isfinite(crown_conc)) or np.all(crown_conc < ibp_conc - 1e-12):
         return ibp_ab
     return affine
@@ -115,8 +96,8 @@ def alpha_crown_optim(cg, var_bounds, lr=0.1, iters=100, opaque=()):
 
     p_grads = grad(loss)
     params = init_params(cg, var_bounds)
-    if len(params) > 0:  # no params => no need to optimize
-        for _ in range(iters):  # gradient *ascent* on alpha => maximize the lower bound
+    if len(params) > 0:
+        for _ in range(iters):
             gs = p_grads(params)[0]
             params = map_structure(lambda p, g: p + lr * g, params, gs)
             params = map_structure(lambda p: core.clip(p, 0.0, 1.0), params)
@@ -145,13 +126,6 @@ def _gelu_deriv_np(t):
 
 
 def _tangent_alpha(f, df, lb, ub, n=65):
-    """Per-element tangent point minimising the worst-case gap to f on [lb, ub].
-
-    For a convex (or concave) f the gap between f and a tangent line is maximal
-    at an endpoint, so a grid search over the tangent point is enough. The
-    midpoint tangent that CROWN uses by default is a poor choice on asymmetric
-    boxes; this is the warm start that alpha then refines.
-    """
     grid = np.linspace(0.0, 1.0, n)
     a = grid.reshape((n,) + (1,) * np.ndim(lb))
     t = lb + a * (ub - lb)
@@ -171,7 +145,6 @@ def init_params(cg, var_bounds):
     for eqn in cg.equations:
         x = get_in_bounds(eqn.inputs, var_bounds)
         if eqn.primitive is relu and isinstance(x[0], Box):
-            # init alpha with adaptive bound
             x_lb, x_ub = x[0].lb, x[0].ub
             alpha = where(-x_lb >= x_ub, zeros(x_lb.shape), ones(x_lb.shape))
             params[eqn.outvar] = alpha
@@ -186,14 +159,12 @@ def crown_relu(alpha, out_w, x):
     x_lb, x_ub = (x.lb, x.ub) if isinstance(x, Box) else (x, x)
     zero, one = zeros(x_lb.shape), ones(x_lb.shape)
 
-    # mixed phase weights used when x_lb <= 0 <= x_ub
     upper_slope = x_ub / (x_ub - x_lb)
-    if alpha is None:  # regular CROWN with adaptive lower slope
+    if alpha is None:
         lower_slope = where(-x_lb >= x_ub, zero, one)
     else:  # alpha-CROWN
         lower_slope = alpha
     upper_offset = -x_ub * x_lb / (x_ub - x_lb)
-    # lower_offset is 0.0
 
     upper_slope = where(x_lb >= zero, one, where(x_ub <= zero, zero, upper_slope))
     lower_slope = where(x_lb >= zero, one, where(x_ub <= zero, zero, lower_slope))
@@ -373,8 +344,6 @@ def crown_normalcdf(alpha, out_w, x):
 
 
 def crown_mul(alpha, out_w, x, y):
-    """Bilinear z = x*y via McCormick envelopes (per-element tighter plane at the
-    box centre). A constant operand is a degenerate box => the bounds are exact."""
     x_lb, x_ub = _in_bounds(x)
     y_lb, y_ub = _in_bounds(y)
     x_mid, y_mid = 0.5 * (x_lb + x_ub), 0.5 * (y_lb + y_ub)
@@ -395,17 +364,11 @@ def crown_mul(alpha, out_w, x, y):
 
 
 def crown_where(alpha, out_w, cond, x, y):
-    """Sound fallback for a where that survived activation fusion.
-
-    Exact on the branches that are decided by the condition bounds, constant
-    enclosure on the undecided ones (a linear relaxation of an undecided
-    where is not possible without knowing how x, y and cond are related).
-    """
     c_lb, c_ub = _in_bounds(cond)
     x_lb, x_ub = _in_bounds(x)
     y_lb, y_ub = _in_bounds(y)
     cl, cu = np.asarray(c_lb.array), np.asarray(c_ub.array)
-    sure_true = (cl > 0.0) | (cu < 0.0)  # where treats any non-zero as true
+    sure_true = (cl > 0.0) | (cu < 0.0)
     sure_false = (cl == 0.0) & (cu == 0.0)
     mixed = ~(sure_true | sure_false)
 
@@ -420,7 +383,6 @@ def crown_where(alpha, out_w, cond, x, y):
 
 def _mccormick_planes(xl, xu, yl, yu):
     """Element-wise McCormick envelopes of the product x*y over [xl,xu]x[yl,yu].
-
     Each envelope is a pair of planes; we keep the one that is tighter at the
     centre of the box, which is what CROWN back-substitutes.
     """
@@ -438,13 +400,12 @@ def _align_dot(xl, yl, out_w):
     """Line the two dot operands and the output weight up on a common product
     tensor, so the contraction becomes an element-wise product plus a sum."""
     xd, yd = xl.ndim, yl.ndim
-    if xd == 0 or yd == 0:  # scalar factor: dot degenerates to a product
+    if xd == 0 or yd == 0:
         return xl.shape, yl.shape, out_w
-    if yd == 1:  # (..., J) @ (J,) -> (...)
+    if yd == 1:
         return xl.shape, yl.shape, core.expand_dims(out_w, axes=(-1,))
-    if xd == 1:  # (J,) @ (..., J, K) -> (..., K)
+    if xd == 1:
         return xl.shape + (1,), yl.shape, core.expand_dims(out_w, axes=(-2,))
-    # (..., I, J) @ (..., J, K) -> (..., I, K)
     return xl.shape + (1,), yl.shape[:-2] + (1,) + yl.shape[-2:], core.expand_dims(
         out_w, axes=(-2,)
     )

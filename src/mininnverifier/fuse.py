@@ -1,18 +1,9 @@
-# Copyright (c) 2026 by David Boetius
-# Licensed under the MIT License.
-"""Fuse decomposed activation subgraphs back into single primitives.
+"""Subgraph fusion and specialized bound tightening for activation subgraphs.
 
-The milestone 3 test networks do not use the fused ``elu``/``gelu`` primitives,
-they spell the activations out:
-
-    elu(t)  = where(relu(t), t, exp(t) - 1)
-    gelu(t) = mul(t, normalcdf(t))
-
-Per-primitive CROWN on those decompositions is hopeless: ``where`` has no useful
-linear relaxation, and ``mul(t, normalcdf(t))`` needs McCormick envelopes over
-two perfectly correlated operands, which throws away most of the tightness.
-Rewriting the subgraph back into the fused primitive lets the dedicated
-``crown_elu``/``crown_gelu`` rules do the work.
+Fuses expanded activation patterns (like ELU, GELU, Softmax, and LayerNorm) 
+back into single primitives or exact enclosures. This enables specialized 
+CROWN and interval rules to compute much tighter bounds than standard 
+per-primitive propagation.
 """
 
 import numpy as np
@@ -35,17 +26,15 @@ def _const_close(atom, value):
 
 
 def _unary_of(prod, atom, primitive, arg):
-    """Check that ``atom`` is produced by ``primitive(arg)``."""
     eqn = prod.get(atom)
     return eqn is not None and eqn.primitive is primitive and eqn.inputs[0] is arg
 
 
 def _is_positivity_test(prod, cond, t):
-    """``cond`` is non-zero exactly where ``t > 0`` (or ``t >= 0``)."""
     eqn = prod.get(cond)
     if eqn is None:
         return False
-    if eqn.primitive is core.relu:  # relu(t) != 0  <=>  t > 0
+    if eqn.primitive is core.relu:  #relu(t) != 0<=>t > 0
         return eqn.inputs[0] is t
     if eqn.primitive in (core.ge, core.greater_equal):
         a, b = eqn.inputs
@@ -54,7 +43,6 @@ def _is_positivity_test(prod, cond, t):
 
 
 def _match_elu(eqn, prod):
-    """where(relu(t), t, exp(t) - 1)  ->  elu(t)"""
     if eqn.primitive is not core.where:
         return None
     cond, t, false_val = eqn.inputs
@@ -62,7 +50,6 @@ def _match_elu(eqn, prod):
         return None
     if not _is_positivity_test(prod, cond, t):
         return None
-    # the false branch is exp(t) - 1
     add_eqn = prod.get(false_val)
     if add_eqn is None or add_eqn.primitive is not core.add:
         return None
@@ -79,7 +66,6 @@ def _match_elu(eqn, prod):
 
 
 def _match_gelu(eqn, prod):
-    """mul(t, normalcdf(t))  ->  gelu(t)"""
     if eqn.primitive is not core.mul:
         return None
     x, y = eqn.inputs
@@ -95,7 +81,6 @@ MATCHERS = (_match_elu, _match_gelu)
 
 
 def fuse_activations(cg: ComputeGraph) -> ComputeGraph:
-    """Rewrite decomposed elu/gelu subgraphs into their fused primitives."""
     prod = _producers(cg)
     new_eqns, changed = [], False
     for eqn in cg.equations:
@@ -112,7 +97,6 @@ def fuse_activations(cg: ComputeGraph) -> ComputeGraph:
 
 
 def prune(cg: ComputeGraph) -> ComputeGraph:
-    """Drop equations whose result is no longer needed for the graph outputs."""
     needed = set(cg.outvars)
     keep = []
     for eqn in reversed(cg.equations):
@@ -121,19 +105,7 @@ def prune(cg: ComputeGraph) -> ComputeGraph:
             needed.update(a for a in eqn.inputs if not a.is_const)
     return ComputeGraph(cg.invars, cg.outvars, tuple(reversed(keep)))
 
-# ---------------------------------------------------------------------------
 # Softmax
-#
-# Per-primitive interval propagation over exp -> reduce_sum -> reciprocal -> mul
-# treats the numerator and the denominator as independent, which they are not:
-# both are built from the same scores. Writing a softmax coordinate as
-#
-#     softmax_i = 1 / (1 + sum_{j != i} exp(g_j - g_i))
-#
-# makes it monotone in every g, so the exact box follows by evaluating each
-# coordinate at the corner that extremises it. That box is the tightest sound
-# one, and it feeds the McCormick envelopes downstream.
-# ---------------------------------------------------------------------------
 
 _EXP_CLIP = 700.0  # np.exp overflows just above this
 
@@ -143,7 +115,6 @@ def _exp(z):
 
 
 def exact_softmax_box(g_lb, g_ub, axis):
-    """Tightest interval enclosure of softmax(g) over the box [g_lb, g_ub]."""
     shift = np.max(g_ub, axis=axis, keepdims=True)
     e_up = _exp(g_ub - shift)
     e_lo = _exp(g_lb - shift)
@@ -158,10 +129,6 @@ def exact_softmax_box(g_lb, g_ub, axis):
 
 
 def find_softmax(cg):
-    """Locate softmax subgraphs: mul(exp(g), reciprocal(sum(exp(g)))).
-
-    Returns a map from the softmax output var to (scores var, axis).
-    """
     prod = _producers(cg)
     found = {}
     for eqn in cg.equations:
@@ -188,24 +155,7 @@ def find_softmax(cg):
             break
     return found
 
-
-# ---------------------------------------------------------------------------
-# Layer norm
-#
-# The normalised value c_i / sqrt(var) obeys a bound that does not depend on the
-# input box at all: with var = alpha * sum_j c_j^2 (+ eps) and c_i^2 <= sum_j
-# c_j^2, we get |c_i| / sqrt(var) <= 1 / sqrt(alpha), i.e. sqrt(H) for the usual
-# mean-of-squares. Interval propagation cannot see this, because it treats the
-# numerator and the variance as unrelated, and a variance box that reaches down
-# to zero sends the reciprocal to infinity.
-# ---------------------------------------------------------------------------
-
-
 def _peel_scale(prod, atom):
-    """Walk back through +const / *const / expand_dims, collecting the scale.
-
-    Returns (reduce_sum equation, scale) or None.
-    """
     scale = 1.0
     for _ in range(8):
         eqn = prod.get(atom)
@@ -220,7 +170,6 @@ def _peel_scale(prod, atom):
             const, other = (a, b) if a.is_const else (b, a)
             if not const.is_const:
                 return None
-            # only a non-negative offset (the epsilon) keeps the bound sound
             if np.min(np.asarray(const.value.array)) < 0.0:
                 return None
             atom = other
@@ -240,10 +189,6 @@ def _peel_scale(prod, atom):
 
 
 def find_layer_norms(cg):
-    """Locate mul(c, reciprocal(sqrt(alpha * sum(c^2) + eps))) subgraphs.
-
-    Returns a map from the normalised output var to its magnitude bound.
-    """
     prod = _producers(cg)
     found = {}
     for eqn in cg.equations:
@@ -271,13 +216,6 @@ def find_layer_norms(cg):
 
 
 def refine_softmax_bounds(cg, var_bounds, box_cls):
-    """Re-propagate the interval bounds, clamping softmax and layer norm.
-
-    The clamp has to happen *during* propagation: replacing a softmax output
-    box afterwards leaves everything downstream computed from the unclamped
-    value, which is where the blow-up actually lands.
-    """
-
     softmaxes = find_softmax(cg)
     layer_norms = find_layer_norms(cg)
     if not softmaxes and not layer_norms:

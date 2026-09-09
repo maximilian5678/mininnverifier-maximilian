@@ -73,9 +73,6 @@ def main():
         print("sat")
         return
 
-    # Violated: assemble the full witness (counterexample for the box input,
-    # the fixed value for each point input), write one .bin per network input,
-    # print the paths, and finish with the verdict on the final line.
     witness = list(inputs)
     witness[box_pos] = counterexample
     for i, inp in enumerate(witness):
